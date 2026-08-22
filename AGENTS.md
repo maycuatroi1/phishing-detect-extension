@@ -89,13 +89,31 @@ Cách tự tay chứng minh post-check còn sống, không cần bất kỳ secr
 
 ## Extension chỉ cảnh báo, không chặn
 
-`pnpm --filter extension lint:no-blocking` cấm manifest xin `webRequestBlocking` hoặc
-`declarativeNetRequestWithHostAccess`, cấm khai báo `declarative_net_request`, và cấm một file vừa
-nghe `chrome.webNavigation` vừa gọi `chrome.tabs.update`.
+`pnpm --filter extension lint:no-blocking` cưỡng chế bốn luật, mỗi luật in kèm lý do riêng khi nó
+bắt được cái gì:
+
+- `manifest-permission`: manifest không được xin `webRequestBlocking`, `declarativeNetRequest`,
+  `declarativeNetRequestWithHostAccess` hay `declarativeNetRequestFeedback`, kể cả ở
+  `optional_permissions`.
+- `manifest-block-rules`: manifest không được khai báo `declarative_net_request`.
+- `runtime-block-rules`: không file nào trong `src/` được gọi `chrome.declarativeNetRequest`. Rule
+  nạp lúc chạy chặn y hệt rule tĩnh, chỉ khó soát hơn vì nó không nằm trong manifest.
+- `navigation-redirect`: nếu có file nào trong `src/` nghe `chrome.webNavigation` thì không file nào
+  trong `src/` được gọi `chrome.tabs.update`. Luật này bắt cả trường hợp listener nằm một file còn
+  cú bẻ hướng nằm file khác. `chrome.tabs.update` một mình, không có listener điều hướng nào, vẫn
+  hợp lệ.
+
+Luật thuần nằm ở `scripts/no-blocking-rules.ts` và có test fixture riêng trong
+`tests/no-blocking.test.ts`, nên phá từng luật một là thấy đỏ ngay.
 
 Lý do: một false positive mà chặn được điều hướng là chặn ngân hàng thật của người dùng. Cảnh báo
-sai làm người ta bực; chặn sai làm người ta gỡ extension và không tin cả dự án nữa. Xem
-`principles/invariants.md#no-blocking` ở harness root.
+sai làm người ta bực một lúc; chặn sai làm hỏng cả buổi làm việc, rồi người ta gỡ extension và không
+tin cả dự án nữa. Xem `principles/invariants.md#no-blocking` ở harness root.
+
+Vế người dùng của cùng invariant ấy: cảnh báo nào cũng tắt được bằng đúng một cú bấm. Popup có nút
+`dismiss-warning`, bấm một lần là badge im hẳn cho host đó, bấm lần nữa là bật lại. Bản ghi tắt nằm
+trong IndexedDB `anti-fraud-dismissals`, không gửi đi đâu và không đổi verdict của server. Thứ tự
+ưu tiên khi sơn badge là tắt hẳn thắng mức mềm, mức mềm thắng cảnh báo cứng.
 
 ## Quyền trong manifest
 
@@ -521,11 +539,14 @@ src/background/tier1.ts       leo thang khi tier 0 nói unknown, nối vào ngu�
 src/background/index.ts       service worker MV3, chỉ đăng ký, không chạm tier 2
 src/popup/popup.ts            popup action, chỗ duy nhất gọi runManualScan
 src/popup/scan-panel.ts       outcome thành chữ hiện lên, hàm thuần
+src/popup/warning-panel.ts    trạng thái cảnh báo thành chữ và nhãn nút tắt, hàm thuần
+src/lib/dismissal-store.ts    IndexedDB riêng cho host đã tắt cảnh báo, một bản ghi mỗi host
 scripts/check-vendor-hash.ts  rehash vendor/, cổng của build và test:contract
 scripts/vendor-ledger.ts      đọc và kiểm sổ digest
 scripts/check-no-secrets.ts   post-check sau build
 scripts/secret-patterns.ts    chín pattern secret, có test riêng
-scripts/lint-no-blocking.ts   cưỡng chế invariant no-blocking
+scripts/lint-no-blocking.ts   runner của invariant no-blocking, in lý do rồi exit 1
+scripts/no-blocking-rules.ts  bốn luật no-blocking, hàm thuần, có test fixture riêng
 tests/contract/               hợp đồng seam, layout AFBL, version, production thật
 tests/kanon/                  k-anonymity tier 1: không credential, so ở client, gộp lô, token không rò
 tests/tier2/                  không tự quét, hết quota là dừng, vòng đời một lần bấm

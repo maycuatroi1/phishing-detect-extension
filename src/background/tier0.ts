@@ -1,5 +1,6 @@
 import { API_BASE_URL } from "../config.ts";
 import { BLOCKLIST_REFRESH_PERIOD_MINUTES, syncBlocklist } from "../lib/blocklist-sync.ts";
+import { readDismissal, silencesWarning } from "../lib/dismissal-store.ts";
 import { readDispute, softensWarning } from "../lib/dispute-store.ts";
 import { hostOfUrl } from "../lib/host.ts";
 import { invalidateTier0Cache, lookupHost, type Tier0Verdict } from "../lib/tier0.ts";
@@ -9,6 +10,8 @@ export const BLOCKLIST_ALARM_NAME = "blocklist-refresh";
 export const HARD_WARNING_TEXT = "!";
 
 export const REPORT_HINT = "Nếu đây là cảnh báo nhầm, mở popup và bấm Báo cảnh báo nhầm, đúng một cú bấm.";
+
+export const DISMISS_HINT = "Trang vẫn mở bình thường, extension không chặn và không chuyển hướng. Muốn im hẳn thì mở popup và bấm Tắt cảnh báo cho trang này.";
 
 export interface BadgeLook {
   readonly text: string;
@@ -23,11 +26,18 @@ export const DISPUTED_LOOK: BadgeLook = {
     "Anti-Fraud: bạn đã báo trang này bị cảnh báo nhầm, nên cảnh báo đang ở mức mềm trong lúc chờ moderator xem lại",
 };
 
+export const DISMISSED_LOOK: BadgeLook = {
+  text: "",
+  color: "#5a616e",
+  title:
+    "Anti-Fraud: bạn đã tắt cảnh báo cho trang này. Mở popup rồi bấm Bật lại cảnh báo nếu muốn nó quay lại, cũng đúng một cú bấm.",
+};
+
 const BADGE_BY_VERDICT: Record<Tier0Verdict, BadgeLook> = {
   phishing: {
     text: HARD_WARNING_TEXT,
     color: "#c62828",
-    title: `Anti-Fraud: trang này nằm trong danh sách lừa đảo đã xác nhận. ${REPORT_HINT}`,
+    title: `Anti-Fraud: trang này nằm trong danh sách lừa đảo đã xác nhận. ${REPORT_HINT} ${DISMISS_HINT}`,
   },
   legit: {
     text: "OK",
@@ -68,6 +78,26 @@ export async function softenIfDisputed(host: string, look: BadgeLook): Promise<B
   }
 }
 
+export function isWarningLook(look: BadgeLook): boolean {
+  return look.text === HARD_WARNING_TEXT || look.text === DISPUTED_LOOK.text;
+}
+
+export async function quietIfDismissed(host: string, look: BadgeLook): Promise<BadgeLook> {
+  if (!isWarningLook(look)) {
+    return look;
+  }
+
+  try {
+    return silencesWarning(await readDismissal(host)) ? DISMISSED_LOOK : look;
+  } catch {
+    return look;
+  }
+}
+
+export async function userAdjustedLook(host: string, look: BadgeLook): Promise<BadgeLook> {
+  return quietIfDismissed(host, await softenIfDisputed(host, look));
+}
+
 export async function paintBadge(tabId: number, verdict: Tier0Verdict): Promise<void> {
   await paintLook(tabId, badgeLookFor(verdict));
 }
@@ -80,7 +110,7 @@ export async function evaluateTab(tabId: number, url: string | undefined): Promi
   }
 
   const result = await lookupHost(host);
-  await paintLook(tabId, await softenIfDisputed(host, badgeLookFor(result.verdict)));
+  await paintLook(tabId, await userAdjustedLook(host, badgeLookFor(result.verdict)));
   return result.verdict;
 }
 

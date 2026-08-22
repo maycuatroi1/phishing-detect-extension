@@ -2,6 +2,12 @@ import { API_BASE_URL, IMPLEMENTED_TIERS } from "../config.ts";
 import { blocklistAgeMs } from "../lib/blocklist-sync.ts";
 import { readStoredBlocklist } from "../lib/blocklist-store.ts";
 import { REPORT_CLAIMS, type ReportClaim } from "../lib/claim.ts";
+import {
+  clearDismissal,
+  readDismissal,
+  writeDismissal,
+  type StoredDismissal,
+} from "../lib/dismissal-store.ts";
 import { readDispute, type StoredDispute } from "../lib/dispute-store.ts";
 import { hostOfUrl } from "../lib/host.ts";
 import { isScannableUrl } from "../lib/scan.ts";
@@ -9,7 +15,13 @@ import { lookupHost, type Tier0Verdict } from "../lib/tier0.ts";
 import { runManualScan } from "../lib/tier2.ts";
 import { fileReport } from "../lib/tier3.ts";
 import { panelView, type PanelModel, type PanelView } from "./scan-panel.ts";
-import { reportPanelView, type ReportModel, type ReportPanelView } from "./report-panel.ts";
+import {
+  reportPanelView,
+  warningLevel,
+  type ReportModel,
+  type ReportPanelView,
+} from "./report-panel.ts";
+import { warningPanelView, type WarningModel, type WarningPanelView } from "./warning-panel.ts";
 
 const REPORT_ACTIONS: Record<ReportClaim, string> = {
   phishing: "report-phishing",
@@ -56,6 +68,12 @@ function render(view: PanelView): void {
   dressButton("scan", view.buttonLabel, view.scanEnabled);
 }
 
+function renderWarning(view: WarningPanelView): void {
+  setSlot("warning-headline", view.headline);
+  setSlot("warning-detail", view.detail);
+  dressButton("dismiss-warning", view.buttonLabel, view.buttonEnabled);
+}
+
 function renderReport(view: ReportPanelView): void {
   setSlot("report-headline", view.headline);
   setSlot("report-detail", view.detail);
@@ -75,6 +93,10 @@ function apply(model: PanelModel): void {
 
 function applyReport(model: ReportModel): void {
   renderReport(reportPanelView(model));
+}
+
+function applyWarning(model: WarningModel): void {
+  renderWarning(warningPanelView(model));
 }
 
 function startScan(url: string | null): void {
@@ -111,6 +133,14 @@ function startScan(url: string | null): void {
   });
 }
 
+async function currentDismissal(host: string): Promise<StoredDismissal | null> {
+  try {
+    return await readDismissal(host);
+  } catch {
+    return null;
+  }
+}
+
 async function currentDispute(host: string): Promise<StoredDispute | null> {
   try {
     return await readDispute(host);
@@ -125,6 +155,50 @@ async function currentVerdict(host: string): Promise<Tier0Verdict> {
   } catch {
     return "no_artifact";
   }
+}
+
+async function startWarning(url: string | null): Promise<void> {
+  const host = url === null ? null : hostOfUrl(url);
+  if (host === null) {
+    applyWarning({ kind: "unsupported" });
+    return;
+  }
+
+  const level = warningLevel(await currentVerdict(host), await currentDispute(host));
+  let dismissal = await currentDismissal(host);
+  applyWarning({ kind: "ready", level, dismissal });
+
+  const button = actionButton("dismiss-warning");
+  if (button === null) {
+    return;
+  }
+
+  let saving = false;
+
+  button.addEventListener("click", () => {
+    if (saving) {
+      return;
+    }
+    saving = true;
+    const turningOff = dismissal === null;
+    applyWarning({ kind: "saving", turningOff });
+
+    const work = turningOff
+      ? writeDismissal({ host, dismissedAt: Date.now() })
+      : clearDismissal(host);
+
+    void work
+      .then(async () => {
+        dismissal = await currentDismissal(host);
+        applyWarning({ kind: "ready", level, dismissal });
+      })
+      .catch(() => {
+        applyWarning({ kind: "ready", level, dismissal });
+      })
+      .finally(() => {
+        saving = false;
+      });
+  });
 }
 
 async function startReport(url: string | null): Promise<void> {
@@ -180,6 +254,7 @@ async function boot(): Promise<void> {
   }
 
   startScan(url);
+  await startWarning(url);
   await startReport(url);
 }
 
