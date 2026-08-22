@@ -8,144 +8,476 @@
       :root {
         color-scheme: light dark;
         --bg: #ffffff;
-        --fg: #16181d;
-        --muted: #5a616e;
-        --line: #e3e6ec;
+        --surface: #f8fafc;
+        --fg: #0f172a;
+        --muted: #475569;
+        --line: #e2e8f0;
+        --line-soft: #eef2f6;
+        --accent: #1e293b;
+        --accent-fg: #ffffff;
+        --focus: #2563eb;
+        --tone-phish: #c62828;
+        --tone-soft: #b45309;
+        --tone-legit: #2e7d32;
+        --tone-unknown: #546e7a;
       }
+
       @media (prefers-color-scheme: dark) {
         :root {
-          --bg: #14161a;
-          --fg: #eef0f4;
-          --muted: #9aa2b1;
-          --line: #2a2e36;
+          --bg: #0f172a;
+          --surface: #1a2334;
+          --fg: #f8fafc;
+          --muted: #a3aec0;
+          --line: #334155;
+          --line-soft: #253148;
+          --accent: #e2e8f0;
+          --accent-fg: #0f172a;
+          --focus: #7dd3fc;
+          --tone-phish: #f87171;
+          --tone-soft: #fbbf24;
+          --tone-legit: #4ade80;
+          --tone-unknown: #94a3b8;
         }
       }
+
+      * {
+        box-sizing: border-box;
+      }
+
       body {
-        width: 300px;
+        width: 340px;
         margin: 0;
-        padding: 14px 16px;
         background: var(--bg);
         color: var(--fg);
-        font: 13px/1.5 system-ui, "Segoe UI", sans-serif;
+        font:
+          13px/1.5 "Inter",
+          system-ui,
+          "Segoe UI",
+          sans-serif;
       }
-      h1 {
-        margin: 0 0 2px;
-        font-size: 14px;
+
+      svg {
+        flex: none;
+        width: 15px;
+        height: 15px;
+        stroke: currentColor;
+        stroke-width: 1.75;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        fill: none;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 14px 10px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .wordmark {
+        flex: 1;
+        min-width: 0;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+
+      .host {
+        display: block;
+        overflow: hidden;
+        color: var(--muted);
+        font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+        font-size: 11px;
+        font-weight: 400;
+        letter-spacing: 0;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .badge {
+        padding: 2px 8px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--surface);
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+      }
+
+      .verdict {
+        padding: 11px 14px 7px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .verdict h2 {
+        margin: 0 0 3px;
+        font-size: 13px;
         font-weight: 600;
       }
-      p {
+
+      .promise {
+        display: flex;
+        align-items: center;
+        gap: 6px;
         margin: 0;
+        padding: 7px 14px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
         color: var(--muted);
+        font-size: 11px;
+        white-space: nowrap;
       }
-      dl {
-        margin: 12px 0 0;
-        padding-top: 10px;
-        border-top: 1px solid var(--line);
-        display: grid;
-        grid-template-columns: auto 1fr;
-        gap: 4px 10px;
+
+      .promise svg {
+        width: 13px;
+        height: 13px;
       }
-      dt {
+
+      .block {
+        padding: 8px 14px 6px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .row-label {
+        display: flex;
+        flex: 1;
+        align-items: center;
+        min-width: 0;
+        gap: 7px;
+      }
+
+      .row-label span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .row-state {
         color: var(--muted);
+        font-size: 12px;
       }
-      dd {
-        margin: 0;
-        overflow-wrap: anywhere;
+
+      .actions {
+        display: flex;
+        gap: 8px;
       }
-      section {
-        margin: 12px 0 0;
-        padding-top: 10px;
-        border-top: 1px solid var(--line);
-      }
+
       button {
-        width: 100%;
-        margin: 0 0 8px;
-        padding: 8px 10px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        min-height: 34px;
+        padding: 6px 12px;
         border: 1px solid var(--line);
-        border-radius: 6px;
+        border-radius: 7px;
         background: transparent;
         color: inherit;
         font: inherit;
+        font-size: 12px;
         font-weight: 600;
         cursor: pointer;
+        transition:
+          background-color 160ms ease-out,
+          border-color 160ms ease-out;
       }
+
+      button:hover:not(:disabled) {
+        background: var(--surface);
+      }
+
+      button:focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 2px;
+      }
+
       button:disabled {
-        opacity: 0.55;
+        opacity: 0.45;
         cursor: default;
       }
-      .headline {
-        margin: 0 0 4px;
+
+      .primary {
+        width: 100%;
+        min-height: 40px;
+        border-color: transparent;
+        background: var(--accent);
+        color: var(--accent-fg);
+      }
+
+      .primary:hover:not(:disabled) {
+        background: var(--accent);
+        opacity: 0.9;
+      }
+
+      .compact {
+        min-height: 30px;
+        padding: 4px 10px;
+        font-size: 11px;
+        font-weight: 500;
+      }
+
+      .pair {
+        flex: 1;
+      }
+
+      .scan {
+        padding: 11px 14px 7px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .status-line {
+        margin: 8px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .status-line strong {
+        display: block;
         color: var(--fg);
         font-weight: 600;
       }
-      ul {
-        margin: 6px 0 8px;
-        padding-left: 18px;
+
+      details {
+        font-size: 12px;
+      }
+
+      summary {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 0;
+        color: var(--muted);
+        cursor: pointer;
+        list-style: none;
+        user-select: none;
+      }
+
+      summary::-webkit-details-marker {
+        display: none;
+      }
+
+      summary:focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 2px;
+        border-radius: 4px;
+      }
+
+      summary svg {
+        width: 13px;
+        height: 13px;
+        transition: transform 160ms ease-out;
+      }
+
+      details[open] > summary svg {
+        transform: rotate(90deg);
+      }
+
+      details p,
+      details ul {
+        margin: 2px 0 6px;
         color: var(--muted);
       }
-      li {
-        margin: 0 0 3px;
+
+      details ul {
+        padding-left: 16px;
       }
-      ul:empty {
+
+      details ul:empty {
         margin: 0;
       }
-      .badge {
-        display: inline-block;
-        min-width: 26px;
-        margin-right: 6px;
-        padding: 1px 6px;
-        border-radius: 4px;
-        background: var(--muted);
-        color: #ffffff;
+
+      details li {
+        margin: 0 0 2px;
+      }
+
+      .drawer {
+        border-top: 1px solid var(--line);
+      }
+
+      .drawer > summary {
+        padding: 10px 14px;
+        font-size: 12px;
+      }
+
+      dl {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 4px 12px;
+        margin: 0;
+        padding: 0 14px 12px;
+        color: var(--muted);
         font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 0.04em;
-        text-align: center;
+      }
+
+      dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+        color: var(--fg);
+        text-align: right;
+      }
+
+      .tone-phish {
+        color: var(--tone-phish);
+      }
+
+      .tone-soft {
+        color: var(--tone-soft);
+      }
+
+      .tone-legit {
+        color: var(--tone-legit);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          transition-duration: 0.01ms !important;
+          animation-duration: 0.01ms !important;
+        }
       }
     </style>
   </head>
   <body>
-    <h1>Anti-Fraud</h1>
-    <p>Tier 0 tra danh sách tải sẵn ngay trong máy. Duyệt web không gửi gì đi đâu.</p>
-    <p>Extension chỉ cảnh báo, không chặn trang, không chuyển hướng, không chèn trang khoá.</p>
-    <section>
-      <p class="headline"><span class="badge" data-slot="status-badge">-</span><span data-slot="status-headline">Đang đọc trạng thái trang</span></p>
-      <p data-slot="status-detail">-</p>
+    <header>
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      </svg>
+      <span class="wordmark">
+        Anti-Fraud
+        <span class="host" data-slot="host">tab này không phải trang web</span>
+      </span>
+      <span class="badge" data-slot="status-badge">-</span>
+    </header>
+
+    <section class="verdict">
+      <h2 data-slot="status-headline">Đang đọc trạng thái trang</h2>
+      <details>
+        <summary>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+          Badge này nghĩa là gì
+        </summary>
+        <p data-slot="status-detail">-</p>
+      </details>
     </section>
-    <section>
-      <p class="headline" data-slot="warning-headline">Đang đọc trạng thái cảnh báo</p>
-      <p data-slot="warning-detail">-</p>
-      <button type="button" data-action="dismiss-warning" disabled>Tắt cảnh báo cho trang này</button>
+
+    <p class="promise">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+        <path d="m9 12 2 2 4-4" />
+      </svg>
+      Chỉ cảnh báo: không chặn trang, không chuyển hướng.
+    </p>
+
+    <section class="scan">
+      <button type="button" class="primary" data-action="scan" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.5-3.5" />
+        </svg>
+        <span data-label>Quét sâu trang này</span>
+      </button>
+      <p class="status-line">
+        <strong data-slot="scan-headline">Chưa quét</strong>
+      </p>
+      <details>
+        <summary>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+          Chi tiết lượt quét
+        </summary>
+        <p data-slot="scan-detail">-</p>
+      </details>
     </section>
-    <section>
-      <button type="button" data-action="scan" disabled>Quét sâu trang này</button>
-      <p class="headline" data-slot="scan-headline">Chưa quét</p>
-      <p data-slot="scan-detail">-</p>
+
+    <section class="block">
+      <div class="row">
+        <span class="row-label">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+          </svg>
+          <span>Cảnh báo</span>
+        </span>
+        <button type="button" class="compact" data-action="dismiss-warning" disabled>
+          <span data-label>Tắt cảnh báo cho trang này</span>
+        </button>
+      </div>
+      <details>
+        <summary>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+          <span data-slot="warning-headline">Đang đọc trạng thái cảnh báo</span>
+        </summary>
+        <p data-slot="warning-detail">-</p>
+      </details>
     </section>
-    <section>
-      <p class="headline" data-slot="auto-scan-headline">Đang đọc trạng thái tự quét</p>
-      <p data-slot="auto-scan-detail">-</p>
-      <ul data-slot="auto-scan-reasons"></ul>
-      <button type="button" data-action="toggle-auto-scan" disabled>Tắt tự quét trang lạ</button>
+
+    <section class="block">
+      <div class="row">
+        <span class="row-label">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1m0-12.8-2.1 2.1M7.7 16.3l-2.1 2.1" />
+          </svg>
+          <span>Tự quét trang lạ</span>
+        </span>
+        <button type="button" class="compact" data-action="toggle-auto-scan" disabled>
+          <span data-label>Tắt tự quét trang lạ</span>
+        </button>
+      </div>
+      <details>
+        <summary>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+          <span data-slot="auto-scan-headline">Đang đọc trạng thái tự quét</span>
+        </summary>
+        <p data-slot="auto-scan-detail">-</p>
+        <ul data-slot="auto-scan-reasons"></ul>
+      </details>
     </section>
-    <section>
-      <p class="headline" data-slot="report-headline">Đang đọc trạng thái trang</p>
-      <p data-slot="report-detail">-</p>
-      <button type="button" data-action="report-false-positive" disabled>Báo cảnh báo nhầm</button>
-      <button type="button" data-action="report-phishing" disabled>Báo trang này lừa đảo</button>
+
+    <section class="block">
+      <div class="actions">
+        <button type="button" class="pair" data-action="report-phishing" disabled>
+          <span data-label>Báo lừa đảo</span>
+        </button>
+        <button type="button" class="pair" data-action="report-false-positive" disabled>
+          <span data-label>Báo cảnh báo nhầm</span>
+        </button>
+      </div>
+      <details>
+        <summary>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+          <span data-slot="report-headline">Đang đọc trạng thái trang</span>
+        </summary>
+        <p data-slot="report-detail">-</p>
+      </details>
     </section>
-    <dl>
-      <dt>API</dt>
-      <dd data-slot="api-base-url">-</dd>
-      <dt>Tier</dt>
-      <dd data-slot="tiers">-</dd>
-      <dt>Version</dt>
-      <dd data-slot="artifact-version">-</dd>
-      <dt>Entry</dt>
-      <dd data-slot="artifact-entries">-</dd>
-      <dt>Tải lúc</dt>
-      <dd data-slot="artifact-age">-</dd>
-    </dl>
+
+    <details class="drawer">
+      <summary>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+        Thông tin kỹ thuật
+      </summary>
+      <dl>
+        <dt>API</dt>
+        <dd data-slot="api-base-url">-</dd>
+        <dt>Tier</dt>
+        <dd data-slot="tiers">-</dd>
+        <dt>Version</dt>
+        <dd data-slot="artifact-version">-</dd>
+        <dt>Entry</dt>
+        <dd data-slot="artifact-entries">-</dd>
+        <dt>Tải lúc</dt>
+        <dd data-slot="artifact-age">-</dd>
+      </dl>
+    </details>
+
     <script type="module" src="./popup.ts"></script>
   </body>
 </html>

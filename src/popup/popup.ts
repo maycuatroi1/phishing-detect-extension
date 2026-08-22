@@ -1,5 +1,6 @@
 import { API_BASE_URL, IMPLEMENTED_TIERS } from "../config.ts";
 import { blocklistAgeMs } from "../lib/blocklist-sync.ts";
+import { inkOn } from "../lib/contrast.ts";
 import { readStoredBlocklist } from "../lib/blocklist-store.ts";
 import { REPORT_CLAIMS, type ReportClaim } from "../lib/claim.ts";
 import {
@@ -69,10 +70,16 @@ function actionButton(action: string): HTMLButtonElement | null {
 
 function dressButton(action: string, label: string, enabled: boolean): void {
   const button = actionButton(action);
-  if (button !== null) {
-    button.disabled = !enabled;
-    button.textContent = label;
+  if (button === null) {
+    return;
   }
+  button.disabled = !enabled;
+  const slot = button.querySelector<HTMLElement>("[data-label]");
+  if (slot === null) {
+    button.textContent = label;
+    return;
+  }
+  slot.textContent = label;
 }
 
 function formatAge(ms: number): string {
@@ -103,6 +110,7 @@ function renderStatus(view: StatusPanelView): void {
   const badge = slot("status-badge");
   if (badge !== null) {
     badge.style.backgroundColor = view.color;
+    badge.style.color = inkOn(view.color);
   }
   setSlot("status-headline", view.headline);
   setSlot("status-detail", view.detail);
@@ -374,6 +382,9 @@ async function boot(): Promise<void> {
   } catch {
     url = null;
   }
+
+  const host = url === null ? null : hostOfUrl(url);
+  setSlot("host", host ?? "tab này không phải trang web");
 
   startScan(url);
   await startWarning(url);

@@ -295,11 +295,20 @@ công bố riêng.
   ngủ sau vài chục giây rảnh, nên không có API nào khác đánh thức nó theo lịch được.
 - `tabs`: để đọc **URL của tab**. Không có quyền này thì Chrome trả về `undefined` và extension
   không có gì để băm. Quyền này cho phép đọc địa chỉ tab, **không** cho phép đọc nội dung trang.
+- `notifications`: để báo kết quả một lượt tự quét ngay khi nó xong. Tự quét chạy lúc bạn vừa mở
+  một trang lạ và kết quả tới sau đó vài giây, nên nếu không nói gì thì bạn không biết đã có một
+  lượt quét chạy. Quyền này chỉ cho phép **hiện** thông báo của chính extension; nó không đọc được
+  thông báo của ai khác và không chạm vào trang nào. Thông báo tự tắt sau 5 giây.
 - `host_permissions: https://anti-fraud.omelet.tech/*`: để gọi được đúng một máy chủ. Đây là một
   origin duy nhất, không phải `<all_urls>`.
 
 Extension **không** xin quyền đọc mọi trang, **không** cài content script, và **không** xin quyền
 `storage`.
+
+Thông báo cố tình dùng `chrome.notifications` chứ không phải một toast chèn vào trang. Toast trong
+trang trông đẹp hơn và đúng ngữ cảnh hơn, nhưng nó cần một content script chạy trên mọi trang, tức
+là dòng "Đọc và thay đổi toàn bộ dữ liệu của bạn trên mọi trang web" lúc cài. Đổi lời hứa đó lấy
+một cái toast đẹp hơn là một cái giá quá đắt.
 
 ## Cách xoá dữ liệu của bạn
 

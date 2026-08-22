@@ -34,8 +34,8 @@ function listSourceFiles(dir: string): string[] {
 const SOURCE_FILES = listSourceFiles(SOURCE_ROOT);
 
 describe("tier 3 không mở thêm một quyền nào trong manifest", () => {
-  it("bộ quyền vẫn đúng hai dòng mà tier 0 đã xin", () => {
-    expect(MANIFEST.permissions).toEqual(["alarms", "tabs"]);
+  it("bộ quyền vẫn đúng ba dòng, và notifications là dòng duy nhất thêm sau tier 0", () => {
+    expect(MANIFEST.permissions).toEqual(["alarms", "notifications", "tabs"]);
     expect(MANIFEST.host_permissions).toEqual(["https://anti-fraud.omelet.tech/*"]);
   });
 

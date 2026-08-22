@@ -9,6 +9,7 @@ import {
   SOFT_REPORT_HINT,
   type BadgeLook,
 } from "../lib/badge.ts";
+import { announceAutoScan } from "./toast.ts";
 import { paintLook, userAdjustedLook } from "./tier0.ts";
 import { evaluateTabTiered } from "./tier1.ts";
 
@@ -65,6 +66,8 @@ export async function considerAutoScan(
   if (outcome.isScam === true) {
     await paintLook(tabId, await userAdjustedLook(host, AUTO_SCAN_WARNING_LOOK));
   }
+
+  await announceAutoScan(host, outcome);
 
   return outcome;
 }
