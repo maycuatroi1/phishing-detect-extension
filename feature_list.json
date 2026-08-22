@@ -1,0 +1,239 @@
+{
+  "spec_version": 1,
+  "repo": "phishing-detect-extension",
+  "_rules": [
+    "Mỗi mục mô tả một hành vi END-TO-END mà người dùng quan sát được trong Chrome, không phải một file, một hàm hay một unit test.",
+    "Agent CHỈ được đổi trường 'passes' và thêm trường 'proof' đi kèm khi lật sang true. Xoá, viết lại hay thu hẹp một mục là không chấp nhận được: nó giấu chức năng thiếu sau một định nghĩa 'xong' co lại.",
+    "Chỉ lật 'passes' thành true khi đã tự chạy các bước và nhìn thấy hành vi xảy ra trong một Chrome thật đã nạp extension. Lật true bắt buộc phải kèm 'proof' ghi nguyên văn lệnh hoặc thao tác, môi trường và kết quả. Không có 'proof' thì 'passes' phải là false.",
+    "Một vitest xanh không phải là bằng chứng cho mục ở đây. Test đơn vị khoá cấu trúc; file này hỏi hệ có chạy không.",
+    "'passes': false nghĩa là chưa chứng minh, không phải là hỏng."
+  ],
+  "notes": [
+    "Convention của skill harness-engineering ghi 'all passes: false'. Ý đồ của nó là mặc định phải là chưa-chứng-minh chứ không phải ép mọi thứ thành false vĩnh viễn.",
+    "Mâu thuẫn cần nói thẳng thay vì im lặng chọn một bên: tính tới 2026-08-23 nhiều hành vi trong file này đã có bằng chứng end-to-end thật. Extension đã được nạp vào Chrome thật qua CDP Extensions.loadUnpacked và tier 0 cùng tier 1 chạy được với production https://anti-fraud.omelet.tech; hợp đồng tier 1 và tier 2 đã được đo thẳng trên production ngày 22/08/2026; pnpm package đã sinh zip xác định. Theo nghĩa đó, một số mục dưới đây xứng đáng true.",
+    "Chúng vẫn để false vì phiên tạo ra file này chỉ được phép TẠO đúng feature_list.json trong repo extension và không được chạy bất kỳ lệnh nào ở đây, nên nó không tự tay quan sát được hành vi nào. Một 'passes': true do nghe kể lại chính là thứ luật thứ ba ở trên cấm.",
+    "Việc cần làm tiếp, không phải viết lại file này: chạy lại từng bộ steps trong một Chrome thật, rồi lật passes kèm proof cho đúng những mục đã quan sát được. Repo llm-phishing-detection-evaluation đang để cả 16 mục false theo cùng lý do và cũng cần một lượt đối chiếu như vậy."
+  ],
+  "features": [
+    {
+      "id": "tier0-local-lookup",
+      "category": "privacy",
+      "description": "Duyệt web bình thường không phát ra một request nào: tier 0 tra hoàn toàn cục bộ trong artifact đã tải và vẫn sơn được badge cảnh báo cho host nằm trong blocklist",
+      "steps": [
+        "Nạp extension vào Chrome và chờ lần đồng bộ blocklist đầu tiên xong",
+        "Mở DevTools Network của service worker rồi xoá log",
+        "Điều hướng qua vài chục host, trong đó có ít nhất một host nằm trong artifact",
+        "Xác nhận badge đổi sang trạng thái cảnh báo cho đúng host đó",
+        "Xác nhận không có request nào phát ra trong suốt quá trình điều hướng"
+      ],
+      "passes": false
+    },
+    {
+      "id": "tier0-artifact-sync",
+      "category": "functional",
+      "description": "Extension tự làm mới blocklist mỗi ngày và không tải lại byte đã có: 304 chỉ làm mới metadata, 200 mới ghi artifact mới",
+      "steps": [
+        "Nạp extension mới và xác nhận lần sync đầu tiên ghi được artifact vào IndexedDB anti-fraud-blocklist",
+        "Kích lại alarm đồng bộ khi server chưa đổi artifact",
+        "Xác nhận server trả 304 và extension chỉ làm mới etag, pinnedUrl, fetchedAt",
+        "Xác nhận số entry trong object store artifact không đổi"
+      ],
+      "passes": false
+    },
+    {
+      "id": "tier0-refuse-corrupt-artifact",
+      "category": "resilience",
+      "description": "Artifact hỏng hoặc lệch header thì extension giữ bản cũ và tiếp tục bảo vệ, thay vì fail open thành không bảo vệ gì",
+      "steps": [
+        "Để extension có sẵn một artifact tốt",
+        "Cho lần sync tiếp theo trả về một artifact có x-blocklist-format hoặc x-blocklist-version lệch với byte trong header",
+        "Xác nhận extension từ chối artifact mới",
+        "Xác nhận tra host cũ vẫn đúng kết quả như trước, tức bản cũ còn nguyên"
+      ],
+      "passes": false
+    },
+    {
+      "id": "tier1-kanon-escalation",
+      "category": "privacy",
+      "description": "Host không có trong artifact cục bộ thì tier 1 chỉ hỏi 20 bit đầu của SHA256(host), gộp lô tối đa 16 prefix và tự so hash đầy đủ ở máy người dùng",
+      "steps": [
+        "Điều hướng tới một host chắc chắn không nằm trong artifact cục bộ",
+        "Bắt request đi ra và xác nhận nó là GET /v1/lookup với tham số p lặp lại",
+        "Xác nhận mỗi giá trị p đúng 5 ký tự hex và không có URL, host hay hash đầy đủ nào trong request",
+        "Xác nhận server trả cả bucket và extension mới là bên so hash đầy đủ",
+        "Xác nhận nhiều host mở gần nhau được gộp vào một request thay vì mỗi host một request"
+      ],
+      "passes": false
+    },
+    {
+      "id": "tier1-no-credentials",
+      "category": "privacy",
+      "description": "Request tier 1 không mang danh tính: không cookie, không Authorization, không install token, không referrer",
+      "steps": [
+        "Điều hướng tới một host lạ để ép tier 1 chạy",
+        "Đọc toàn bộ header của request /v1/lookup trong DevTools",
+        "Xác nhận không có Cookie, không có Authorization và không có header nào do client tự đặt",
+        "Xác nhận request đi với credentials omit và referrerPolicy no-referrer"
+      ],
+      "passes": false
+    },
+    {
+      "id": "tier1-four-answers-distinct",
+      "category": "functional",
+      "description": "Bốn câu trả lời của tier 1 hiện ra khác nhau ở popup: phishing, legit, unknown và absent không bị gộp, và unavailable không bị đọc thành sạch",
+      "steps": [
+        "Dựng bốn host cho ra bốn kết quả tier 1 khác nhau",
+        "Mở popup ở từng host và ghi lại thứ người dùng nhìn thấy",
+        "Xác nhận unknown, tức corpus có host nhưng chưa quyết, khác hẳn absent, tức corpus không có host",
+        "Ngắt mạng rồi mở popup và xác nhận nó hiện unavailable chứ không hiện an toàn"
+      ],
+      "passes": false
+    },
+    {
+      "id": "tier2-only-on-click",
+      "category": "cost",
+      "description": "Tier 2 chỉ chạy khi người dùng bấm: duyệt web không bao giờ tự tiêu một lượt LLM",
+      "steps": [
+        "Nạp extension và điều hướng qua ít nhất 20 trang lạ",
+        "Xác nhận số request POST /v1/scan phát ra đúng bằng không",
+        "Mở popup ở một trang và bấm nút Quét sâu trang này",
+        "Xác nhận đúng một POST /v1/scan phát ra sau cú bấm đó"
+      ],
+      "passes": false
+    },
+    {
+      "id": "tier2-poll-not-wait",
+      "category": "functional",
+      "description": "Người dùng bấm quét sâu và nhận verdict qua poll, còn khi quét chưa xong thì popup nói chưa xong chứ không suy ra sạch",
+      "steps": [
+        "Bấm quét sâu và xác nhận server trả 202 ngay kèm scan_id",
+        "Xác nhận client chờ poll_after_seconds rồi mới GET /v1/scan/{scan_id}",
+        "Trong lúc trạng thái còn queued, xác nhận popup không hiển thị verdict nào",
+        "Ép quá trần poll và xác nhận popup hiện pending kèm scan_id thay vì kết luận"
+      ],
+      "passes": false
+    },
+    {
+      "id": "tier2-quota-stops",
+      "category": "cost",
+      "description": "Hết quota là dừng hẳn: không retry ngầm, nút quét bị khoá và người dùng thấy đúng mốc mở lại",
+      "steps": [
+        "Ép server trả 429 quota_exceeded cho một lần quét sâu",
+        "Xác nhận số request phát ra sau 429 đúng bằng không",
+        "Xác nhận nút quét bị disable",
+        "Xác nhận popup hiển thị mốc reset_at lấy từ phản hồi"
+      ],
+      "passes": false
+    },
+    {
+      "id": "tier2-token-isolation",
+      "category": "privacy",
+      "description": "Install token chỉ đi kèm tier 2 và tier 3, tuyệt đối không bao giờ đi kèm tier 1, vì gắn token vào tier 1 là phá đúng tính chất k-anonymity mà tier 1 tồn tại để giữ",
+      "steps": [
+        "Nạp extension mới và để nó lấy install token qua POST /v1/install",
+        "Ép tier 1 chạy rồi kiểm mọi header của /v1/lookup",
+        "Xác nhận không có token trong đó",
+        "Bấm quét sâu và xác nhận /v1/scan có mang token",
+        "Xác nhận token nằm trong IndexedDB chứ không nằm trong bất kỳ file nào của dist"
+      ],
+      "passes": false
+    },
+    {
+      "id": "tier3-report-flow",
+      "category": "functional",
+      "description": "Người dùng gặp một trang lừa đảo chưa có trong corpus, báo cáo được ngay từ popup, và biết là báo cáo đã được nhận",
+      "steps": [
+        "Mở popup ở một trang chưa có verdict",
+        "Gửi báo cáo lừa đảo",
+        "Xác nhận POST /v1/report trả 202",
+        "Xác nhận popup xác nhận đã nhận và không tự đổi verdict của trang thành lừa đảo"
+      ],
+      "passes": false
+    },
+    {
+      "id": "tier3-false-positive-softens",
+      "category": "functional",
+      "description": "Người dùng báo nhầm thì cảnh báo mềm đi ngay trên máy họ, nhưng verdict của server không bị một khai báo người dùng ghi đè",
+      "steps": [
+        "Tới một host đang bị cảnh báo",
+        "Gửi báo nhầm từ popup",
+        "Xác nhận badge chuyển sang mức mềm trên máy đó",
+        "Xác nhận lần tra sau vẫn nhận verdict gốc từ server, tức khai báo người dùng không phải là nhãn"
+      ],
+      "passes": false
+    },
+    {
+      "id": "warn-never-block",
+      "category": "safety",
+      "description": "Extension cảnh báo chứ không chặn: không lần điều hướng nào bị huỷ hay bẻ hướng, kể cả với host bị đánh dấu lừa đảo",
+      "steps": [
+        "Điều hướng tới một host đang bị cảnh báo",
+        "Xác nhận trang vẫn tải bình thường và chỉ có badge cùng popup đổi",
+        "Chạy pnpm --filter extension lint:no-blocking và xác nhận nó xanh",
+        "Thêm thử một quyền chặn vào manifest và xác nhận lint đó đỏ kèm lý do"
+      ],
+      "passes": false
+    },
+    {
+      "id": "dismiss-warning",
+      "category": "functional",
+      "description": "Một cú bấm tắt được cảnh báo cho một host, bấm lần nữa bật lại, và việc tắt đó không rời khỏi máy người dùng",
+      "steps": [
+        "Tới một host đang bị cảnh báo và bấm nút tắt cảnh báo trong popup",
+        "Xác nhận badge im hẳn cho host đó",
+        "Bấm lần nữa và xác nhận cảnh báo quay lại",
+        "Xác nhận không request nào phát ra vì thao tác tắt, và bản ghi nằm trong IndexedDB anti-fraud-dismissals"
+      ],
+      "passes": false
+    },
+    {
+      "id": "vendor-seam-hash",
+      "category": "contract",
+      "description": "Bản sao hợp đồng mà extension vendor về luôn khớp byte với bản do phishing-detect-web sở hữu, và build đỏ ngay khi lệch",
+      "steps": [
+        "Chạy pnpm --filter extension check:vendor và xác nhận nó xanh",
+        "Sửa một byte trong vendor/openapi/public.yaml",
+        "Chạy lại và xác nhận nó đỏ, chỉ đúng file lệch",
+        "Xác nhận pnpm --filter extension build cũng đỏ vì check:vendor chạy trước vite build"
+      ],
+      "passes": false
+    },
+    {
+      "id": "package-deterministic",
+      "category": "release",
+      "description": "Đóng gói hai lần trên cùng một dist ra file zip giống hệt nhau tới từng byte, nên một bản phát hành kiểm chứng lại được",
+      "steps": [
+        "Chạy pnpm --filter extension package rồi ghi lại sha256 của dist/extension.zip",
+        "Chạy lại package trên đúng dist đó",
+        "Xác nhận sha256 không đổi",
+        "Xác nhận zip không chứa node_modules, src, tests, scripts, vendor, sourcemap hay file .md"
+      ],
+      "passes": false
+    },
+    {
+      "id": "package-no-secrets",
+      "category": "safety",
+      "description": "Không secret nào lọt được vào gói phát hành, kể cả khi nó nằm sẵn trong dist, vì post-check mở zip ra quét từng entry",
+      "steps": [
+        "Nhét một chuỗi hình install token vào một file trong dist",
+        "Chạy pnpm --filter extension package",
+        "Xác nhận nó đỏ và chỉ đúng entry chứa chuỗi đó",
+        "Dựng một zip chỉ chứa entry có token rồi chạy check:no-secrets và xác nhận nó cũng đỏ"
+      ],
+      "passes": false
+    },
+    {
+      "id": "load-unpacked-against-production",
+      "category": "functional",
+      "description": "Gói build ra nạp được vào một Chrome thật và chạy đúng với production, không chỉ chạy trong test",
+      "steps": [
+        "Chạy pnpm --filter extension build",
+        "Nạp thư mục dist vào Chrome thật bằng Extensions.loadUnpacked qua CDP hoặc bằng tay",
+        "Xác nhận tier 0 đồng bộ được artifact từ production và sơn badge đúng",
+        "Xác nhận tier 1 gọi được /v1/lookup của production và trả về một trong bốn câu trả lời hợp lệ",
+        "Xác nhận không có lỗi nào trong console của service worker"
+      ],
+      "passes": false
+    }
+  ]
+}
