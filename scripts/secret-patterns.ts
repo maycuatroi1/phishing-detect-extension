@@ -45,6 +45,11 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
     label: "JSON Web Token",
     regex: /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
   },
+  {
+    id: "install-token",
+    label: "install token của anti-fraud (aft1_)",
+    regex: /\baft1_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g,
+  },
 ];
 
 export interface SecretPatternMatch {

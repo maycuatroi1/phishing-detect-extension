@@ -52,11 +52,42 @@
         margin: 0;
         overflow-wrap: anywhere;
       }
+      section {
+        margin: 12px 0 0;
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+      }
+      button {
+        width: 100%;
+        margin: 0 0 8px;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.55;
+        cursor: default;
+      }
+      .headline {
+        margin: 0 0 4px;
+        color: var(--fg);
+        font-weight: 600;
+      }
     </style>
   </head>
   <body>
     <h1>Anti-Fraud</h1>
     <p>Tier 0 tra danh sách tải sẵn ngay trong máy. Duyệt web không gửi gì đi đâu.</p>
+    <section>
+      <button type="button" data-action="scan" disabled>Quét sâu trang này</button>
+      <p class="headline" data-slot="scan-headline">Chưa quét</p>
+      <p data-slot="scan-detail">-</p>
+    </section>
     <dl>
       <dt>API</dt>
       <dd data-slot="api-base-url">-</dd>

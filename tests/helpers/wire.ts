@@ -29,6 +29,10 @@ function headerRecord(init: RequestInit | undefined): Record<string, string> {
   return record;
 }
 
+export function pathOf(request: WireRequest): string {
+  return new URL(request.url).pathname;
+}
+
 export function describeRequest(request: WireRequest): string {
   const headers = Object.entries(request.headers)
     .map(([name, value]) => `${name}: ${value}`)

@@ -16,6 +16,7 @@ const FAKE_SAMPLES: Record<string, string> = {
   "postgres-url-with-password": `postgres://fakeuser:${filler(20)}@127.0.0.1:5432/db`,
   "pem-private-key": "-----BEGIN PRIVATE KEY-----",
   "json-web-token": `eyJ${filler(12)}.eyJ${filler(12)}.${filler(12)}`,
+  "install-token": `aft1_${filler(43)}`,
 };
 
 const CLEAN_BUNDLE = [
@@ -25,7 +26,7 @@ const CLEAN_BUNDLE = [
 ].join("\n");
 
 describe("scanSecretPatterns", () => {
-  it("phủ đúng tám pattern secret mà plan liệt kê", () => {
+  it("phủ đúng chín pattern secret mà plan liệt kê", () => {
     expect(SECRET_PATTERNS.map((pattern) => pattern.id).sort()).toEqual(
       Object.keys(FAKE_SAMPLES).sort(),
     );

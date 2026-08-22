@@ -55,9 +55,10 @@ Post-check quét mọi file văn bản trong `dist/`, bỏ qua file nhị phân,
   in ra, chỉ in tên biến, chunk và offset.
 - `env-var-reference`: output còn sót `process.env.X` hoặc `import.meta.env.X` với `X` ngoài tiền tố
   `PUBLIC_`, tức là bundle định đọc biến môi trường lúc chạy.
-- `secret-pattern`: tám pattern trong `scripts/secret-patterns.ts`, gồm khoá kiểu OpenAI `sk-`,
+- `secret-pattern`: chín pattern trong `scripts/secret-patterns.ts`, gồm khoá kiểu OpenAI `sk-`,
   khoá Google `AIza`, client secret Google `GOCSPX-`, token Cloudflare `cfat`, secret key Turnstile
-  `0x4AAAAAA`, chuỗi `postgres://` có mật khẩu, private key PEM, và JWT.
+  `0x4AAAAAA`, chuỗi `postgres://` có mật khẩu, private key PEM, JWT, và install token `aft1_` của
+  chính API này.
 
 Mỗi phát hiện in ra **tên biến** (hoặc id pattern) và **tên chunk** chứa nó, rồi build thoát 1.
 
@@ -125,13 +126,28 @@ không `<all_urls>`. Extension không bao giờ đọc nội dung trang ở tier
 
 Tier 1 **không thêm quyền nào**. `GET /v1/lookup` nằm trên đúng origin đã có trong
 `host_permissions`, và nó cũng không trả header CORS nên `host_permissions` là thứ khiến fetch chạy
-được, y như `/v1/blocklist`. Lô quyền tiếp theo chỉ mở ra khi tier 2 cần, không sớm hơn.
+được, y như `/v1/blocklist`.
+
+Tier 2 **cũng không thêm quyền nào**, và đó là một lựa chọn có chủ ý chứ không phải may mắn. Ba thứ
+tier 2 cần đều đã có sẵn:
+
+- URL đầy đủ của tab đang mở. `chrome.tabs.query({active: true, currentWindow: true})` trong popup
+  đọc được nó bằng đúng quyền `tabs` mà tier 0 đã xin. Không cần `activeTab`, không cần content
+  script, và popup vẫn chỉ đọc `tab.url` chứ không bao giờ đọc nội dung trang.
+- Fetch tới `/v1/install`, `/v1/scan` và `/v1/scan/{scan_id}`. Cả ba nằm trên đúng origin đã có
+  trong `host_permissions`.
+- Chỗ lưu install token. Nó nằm trong **IndexedDB**, database riêng `anti-fraud-install`, và
+  IndexedDB **không cần quyền nào** trong MV3. `chrome.storage.local` cũng lưu được nhưng nó đòi
+  quyền `storage`, tức là một dòng quyền mới trong bản review của Chrome Web Store để đổi lấy đúng
+  một bản ghi. Không đáng.
+
+Lô quyền tiếp theo chỉ mở ra khi tier 3 cần, không sớm hơn.
 
 Bốn tier của plan `anti-fraud-he-thong-song`:
 
 - Tier 0 `GET /v1/blocklist`, tra cục bộ, không chạm mạng khi duyệt web. **Đã có.**
 - Tier 1 `GET /v1/lookup`, k-anonymity trên 20 bit đầu của `SHA256(host)`, không gắn auth. **Đã có.**
-- Tier 2 `POST /v1/scan` cộng `GET /v1/scan/{scan_id}`, chỉ chạy khi người dùng bấm.
+- Tier 2 `POST /v1/scan` cộng `GET /v1/scan/{scan_id}`, chỉ chạy khi người dùng bấm. **Đã có.**
 - Tier 3 `POST /v1/report`, khai báo của người dùng, không bao giờ là nhãn.
 
 `POST /v1/install` cấp install token cho tier 2 và tier 3, không thuộc tier nào.
@@ -177,7 +193,7 @@ liệu thật**: 19594 byte, 1406 entry phish và 1041 entry legit.
 
 ### Version là số thứ tự thay đổi nội dung, không phải đồng hồ
 
-Từ commit `73b7e8d` của `phishing-detect-web`, version của artifact **derive từ byte của artifact**,
+Từ commit `7d22fe4` của `phishing-detect-web`, version của artifact **derive từ byte của artifact**,
 không derive từ timestamp của corpus. Vẫn là uint32 tăng dần ở byte 6, layout không đổi một byte.
 
 Hai điều client phải tôn trọng:
@@ -269,6 +285,130 @@ mất thông tin mà moderation console đã bỏ công tạo ra.
 extension kết luận `absent` cho từng cái. Server đã đưa đủ ứng viên; thứ duy nhất quyết định nằm ở
 máy người dùng.
 
+## Tier 2
+
+Tier 2 gửi **URL đầy đủ** lên server và tiêu một lượt LLM thật. Nó chỉ chạy khi người dùng bấm nút
+"Quét sâu trang này" trong popup. Không listener điều hướng, không alarm, không chạy nền, không
+prefetch, không "quét trước cho nhanh".
+
+Ràng buộc đó là ràng buộc **chi phí**, không phải một tối ưu. Mỗi lần quét là một lần gọi model tính
+tiền vào tài khoản chủ dự án. Nối tier 2 vào lưu lượng duyệt web là để hoá đơn trôi theo số tab người
+ta mở.
+
+### "Chỉ khi bấm" được khoá bằng cấu trúc chứ không bằng ý định
+
+Service worker **không import được** một dòng nào của tier 2. `src/background/index.ts` chỉ với tới
+`background/tier0.ts` và `background/tier1.ts`; `lib/tier2.ts`, `lib/scan.ts`, `lib/install.ts` và
+`lib/token-store.ts` nằm ngoài đồ thị import đó, và `tests/tier2/no-auto-scan.test.ts` đi bộ đồ thị
+import để bắt lỗi ngay khi ai đó nối vào. `pnpm --filter extension build` cũng chứng minh điều này ở
+mức bundle: `dist/background.js` không chứa chuỗi `/v1/scan` nào.
+
+Vế động của cùng một tính chất: bài test mô phỏng điều hướng qua **20 trang lạ**, stub luôn cả
+`globalThis.fetch` để không đường nào lọt, rồi assert số request `/v1/scan` đúng bằng **không**. Sau
+đó gọi `runManualScan` đúng một lần và assert đúng một `POST /v1/scan`.
+
+Bốn file tier 2 cũng không được nhắc `chrome.tabs`, `chrome.alarms`, `chrome.webNavigation`,
+`chrome.runtime`, `addListener` hay `setInterval`. Một hàm không có cách nào tự chạy thì nó không thể
+tự chạy.
+
+### Install token
+
+`POST /v1/install` với thân đúng hai byte `{}` trả 201 `{install_token, rotate_after_days}`. Token
+dài 48 ký tự, hình `aft1_` cộng 43 ký tự base64url. Nó là **credential lấy lúc chạy**, nên nó nằm
+trong IndexedDB của extension và **không bao giờ nằm trong bundle**. `check-no-secrets` chỉ chặn biến
+build-time, nên nó không phải là thứ bảo vệ điều này; thứ bảo vệ điều này là không có chỗ nào trong
+`src/` viết ra một token.
+
+Token xin **một lần** rồi dùng lại. Không xin token mới mỗi lần quét: mỗi token mang hạn mức riêng,
+nên xin mới mỗi lần là biến hạn mức 20 lần thành vô hạn, tức là tự phá đúng thứ hạn mức tồn tại để
+làm. Chỉ hai trường hợp mint lại, cả hai đều bị chặn số lần:
+
+- Token quá `rotate_after_days` ngày kể từ lúc mint.
+- Server trả 401 `missing_token` hoặc `invalid_token`. Đúng **một** lần mint lại rồi thử lại một
+  lần, có cờ chặn, không lặp.
+
+Thêm một lớp nữa cho chắc: `scripts/secret-patterns.ts` có pattern `install-token` bắt
+`aft1_` cộng 43 ký tự, nên một token hardcode lọt vào `dist/` sẽ làm `pnpm --filter extension build`
+đỏ.
+
+### Token gắn tier 2, tuyệt đối không gắn tier 1
+
+Token là thứ nối mọi lần quét về một danh tính. Tier 2 đã gửi full URL rồi nên gắn token vào không
+mất thêm gì; tier 1 thì ngược lại, một token ở đó xoá sạch k-anonymity (xem mục "Không gắn install
+token, và đó là chủ ý" ở trên).
+
+`tests/kanon/token-isolation.test.ts` khoá vế này: nó chạy hết một lượt tier 2 để token thật sự nằm
+trong kho, rồi chạy một lượt tier 1 và bắt request đó phải đi ra với `headerNames` rỗng, không
+`Authorization`, không `Cookie`, và không byte nào của token trong toàn bộ request. Nó cũng đi bộ đồ
+thị import của bốn file tier 1 để chứng minh chúng không chạm tới `lib/install.ts` hay
+`lib/token-store.ts`.
+
+### `/v1/scan` nhận đúng một trường `url`
+
+Không `prompt`, không `html`, không `model`, không `system`, không `options`. Server tự fetch trang,
+tự strip, tự dựng prompt. Đây là hàng rào cấu trúc chống biến endpoint thành một LLM proxy miễn phí
+cho cả internet, nên một trường thừa là **400 `unknown_field`** chứ không phải một cảnh báo.
+
+`scanRequestBody()` là chỗ duy nhất dựng thân request và nó chỉ dựng được đúng một trường.
+
+### Hợp đồng đo thẳng trên production, ngày 22/08/2026
+
+Đo bằng một install token mới, không phải suy đoán:
+
+- `POST /v1/install` thân `{}` trả **201** `{"install_token":"aft1_...","rotate_after_days":90}`,
+  token 48 ký tự.
+- `POST /v1/scan` kèm `Authorization: Bearer <token>` và `{"url":"https://example.com"}` trả **202**
+  `{"scan_id":"...","status":"queued","poll_after_seconds":2,"quota_remaining":19}`.
+- `GET /v1/scan/{id}` cùng token trả **200** verdict envelope. Một scan thật xong sau khoảng 3,4
+  giây, `status: "done"`, `confidence_basis: "uncalibrated_single_vote"`, `model: "gpt-5-mini"`.
+- Không token là **401** `missing_token`. Thêm trường `prompt` là **400** `unknown_field`, và mã 400
+  này được trả **trước** khi hạn mức bị trừ.
+- Hạn mức là **20 lần một install token trong 86400 giây**. Lần thứ 21 là 429.
+
+**Hình dạng thật của 429**, vì plan đòi UI hiện thời điểm reset nên phải biết server để nó ở đâu:
+
+```
+HTTP/1.1 429 Too Many Requests
+cache-control: no-store
+retry-after: 86395
+
+{"error":{"code":"quota_exceeded",
+          "message":"One install token may request 20 scans per 86400 seconds. ...",
+          "retry_after":86395,
+          "reset_at":"2026-08-23T16:11:10.783Z"}}
+```
+
+Server trả thời điểm reset ở **cả hai chỗ**: `error.reset_at` trong thân là một mốc ISO 8601, và
+`retry-after` là số giây, lặp lại trong `error.retry_after`. Gọi tiếp lần nữa vẫn 429, `reset_at`
+**đứng yên** còn `retry_after` giảm dần, nên `reset_at` là thứ đáng hiển thị.
+
+Client **chỉ đọc `reset_at`**, không bao giờ tự cộng `Date.now()` với `retry_after` để dựng ra một
+mốc. Nếu một ngày nào đó server trả 429 mà thiếu `reset_at` thì UI nói thẳng "server không trả thời
+điểm mở lại" chứ không bịa; `tests/tier2/quota-exceeded.test.ts` khoá cả nhánh đó.
+
+### Hết quota là dừng hẳn
+
+Không backoff, không retry ngầm, không hẹn giờ thử lại. `runManualScan` gặp `quota_exceeded` là trả
+về ngay, và test assert số request phát ra **sau** 429 đúng bằng 0 cũng như không có một lần
+`sleep()` nào được gọi. Nút quét bị disable và popup ghi rõ mốc mở lại.
+
+Lý do: retry tự động khi hết quota không bao giờ thành công trước `reset_at`, nên nó chỉ đốt pin, đốt
+băng thông và đốt log của server. Người dùng bấm lại là đủ.
+
+### Poll chứ không chờ
+
+`POST /v1/scan` trả 202 ngay, verdict đến sau. Client chờ `poll_after_seconds` rồi `GET
+/v1/scan/{scan_id}`, lặp tối đa `SCAN_POLL_MAX_ATTEMPTS` lần. Envelope có **một hình duy nhất** ở mọi
+trạng thái, kể cả lúc còn `queued`, nên chỉ có một parser. Hết trần poll thì trả `pending` kèm
+`scan_id` chứ không poll mãi.
+
+`status: "done"` cộng `parse_ok: true` mới có verdict. Mọi trạng thái khác mang ba null và popup hiển
+thị đúng như vậy, không suy ra "sạch" từ một scan chưa xong.
+
+`confidence` **không phải phép đo**. Seam `llm_output.v1` chỉ mang `{is_scam: bool}` và server chưa
+được hiệu chuẩn trên corpus nào, nên `confidence_basis: "uncalibrated_single_vote"` phải hiện thành
+một lưu ý mềm chứ không phải một con số đáng tin.
+
 ## Hai file seam vendor
 
 `vendor/openapi/public.yaml` và `vendor/schemas/verdict.schema.json` là **byte copy** của hợp đồng
@@ -345,6 +485,15 @@ tới `/v1/lookup`, và ba thứ phải đúng cùng lúc:
 - Mở vài tab lạ liền nhau thì chúng gộp vào cùng một request nhiều `p`, không phải mỗi tab một
   request, và request bắn đi trễ vài trăm mili giây so với lúc mở trang.
 
+**Tier 2, chỉ khi bấm.** Mở tab Network của popup (chuột phải vào icon, "Inspect popup"), rồi điều
+hướng qua chục trang lạ: Network **không có** một request `/v1/scan` nào, chỉ có `/v1/lookup`. Bấm
+"Quét sâu trang này" mới thấy `POST /v1/install` lần đầu, rồi `POST /v1/scan`, rồi vài
+`GET /v1/scan/{id}` cách nhau hai giây. Bấm lần thứ hai không có `/v1/install` nữa vì token đã nằm
+trong IndexedDB `anti-fraud-install`.
+
+Bấm đủ 20 lần trên cùng một install token thì lần 21 là 429 và popup ghi mốc mở lại lấy từ
+`error.reset_at`; sau đó Network đứng im, không có request nào nữa cho tới khi bấm lại.
+
 ## Bố cục
 
 ```
@@ -362,16 +511,24 @@ src/lib/tier0.ts              tra cục bộ, có cache trong bộ nhớ
 src/lib/lookup.ts             hợp đồng /v1/lookup, dựng URL, so hash đầy đủ
 src/lib/lookup-batch.ts       gộp tối đa 16 prefix, jitter tiêm từ ngoài, cache bucket
 src/lib/tier1.ts              host thành prefix, bucket thành verdict
+src/lib/api-error.ts          bộ mã lỗi dùng chung của install, scan và report
+src/lib/install.ts            hợp đồng /v1/install, hình dạng install token
+src/lib/token-store.ts        IndexedDB riêng cho install token, đúng một bản ghi
+src/lib/scan.ts               hợp đồng /v1/scan và /v1/scan/{id}, parser verdict envelope
+src/lib/tier2.ts              lấy token, gửi scan, poll, dừng hẳn khi hết quota
 src/background/tier0.ts       alarm, listener tab, sơn badge
 src/background/tier1.ts       leo thang khi tier 0 nói unknown, nối vào nguồn ngẫu nhiên
-src/background/index.ts       service worker MV3, chỉ đăng ký
-src/popup/                    popup action
+src/background/index.ts       service worker MV3, chỉ đăng ký, không chạm tier 2
+src/popup/popup.ts            popup action, chỗ duy nhất gọi runManualScan
+src/popup/scan-panel.ts       outcome thành chữ hiện lên, hàm thuần
 scripts/check-vendor-hash.ts  rehash vendor/, cổng của build và test:contract
 scripts/vendor-ledger.ts      đọc và kiểm sổ digest
 scripts/check-no-secrets.ts   post-check sau build
-scripts/secret-patterns.ts    tám pattern secret, có test riêng
+scripts/secret-patterns.ts    chín pattern secret, có test riêng
 scripts/lint-no-blocking.ts   cưỡng chế invariant no-blocking
 tests/contract/               hợp đồng seam, layout AFBL, version, production thật
-tests/kanon/                  k-anonymity tier 1: không credential, so ở client, gộp lô
+tests/kanon/                  k-anonymity tier 1: không credential, so ở client, gộp lô, token không rò
+tests/tier2/                  không tự quét, hết quota là dừng, vòng đời một lần bấm
+tests/helpers/imports.ts      đi bộ đồ thị import của src/, dùng để khoá ranh giới tier
 tests/                        vitest phần còn lại
 ```
