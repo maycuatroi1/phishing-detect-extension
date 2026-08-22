@@ -10,20 +10,24 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "build": "vite build && tsx scripts/check-no-secrets.ts",
+    "build": "tsx scripts/check-vendor-hash.ts && vite build && tsx scripts/check-no-secrets.ts",
     "check:no-secrets": "tsx scripts/check-no-secrets.ts",
+    "check:vendor": "tsx scripts/check-vendor-hash.ts",
     "lint:no-blocking": "tsx scripts/lint-no-blocking.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:contract": "tsx scripts/check-vendor-hash.ts && vitest run tests/contract",
     "test:secrets": "vitest run tests/secret-patterns.test.ts --reporter=verbose"
   },
   "devDependencies": {
     "@types/chrome": "0.2.7",
     "@types/node": "26.2.0",
     "dotenv": "17.4.2",
+    "fake-indexeddb": "6.2.5",
     "tsx": "4.23.12",
     "typescript": "6.0.3",
     "vite": "8.2.2",
-    "vitest": "4.1.11"
+    "vitest": "4.1.11",
+    "yaml": "2.9.0"
   }
 }

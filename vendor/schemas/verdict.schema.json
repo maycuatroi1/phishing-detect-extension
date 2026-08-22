@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:phishing-detect:verdict-envelope:1",
+  "title": "VerdictEnvelope",
+  "description": "The one body GET /v1/scan/{scan_id} returns at every stage of a scan, including while it is still queued. The endpoint answers 200 with this shape whether the scan is queued, running, done or failed, so a client only ever parses one shape. Built by buildVerdictEnvelope() in src/lib/verdict.ts; this file and that function must agree byte for byte in field names.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "scan_id",
+    "status",
+    "is_scam",
+    "confidence",
+    "confidence_basis",
+    "source",
+    "site_id",
+    "evidence_id",
+    "model",
+    "prompt_version",
+    "requested_at",
+    "checked_at",
+    "parse_ok",
+    "parse_failure_reason",
+    "failure"
+  ],
+  "properties": {
+    "scan_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The scan this envelope describes. Same value the 202 from POST /v1/scan handed back."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "running",
+        "done",
+        "failed"
+      ],
+      "description": "Lifecycle of the scan, not a judgement about the site. Only done carries a verdict. A scan left queued or running past SCAN_STALE_SECONDS is swept to failed with failure=scan_abandoned; the sweep runs on POST /v1/scan and on GET /v1/scan/{scan_id}, so a client that only polls still reaches a terminal state."
+    },
+    "is_scam": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "The model's boolean vote, and null unless the scan finished and its response parsed. Never inferred from an unparsed response."
+    },
+    "confidence": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Not a measurement. The frozen llm_output.v1 seam carries only {is_scam: bool}, so there is no probability to read, and this server has not been calibrated on any corpus. Read confidence_basis before using this number for anything."
+    },
+    "confidence_basis": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "uncalibrated_single_vote",
+        "corpus_label",
+        "moderator_decision",
+        null
+      ],
+      "description": "Where the confidence came from. uncalibrated_single_vote means one boolean vote from one model with no calibration behind it: show it as a soft notice, never at the weight of a corpus hit."
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "local",
+        "lookup",
+        "llm",
+        "human"
+      ],
+      "description": "Which detection tier produced the verdict. GET /v1/scan/{scan_id} always answers llm; the other values exist so a client can hold verdicts from every tier in one shape."
+    },
+    "site_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The corpus row for the normalised URL that was scanned."
+    },
+    "evidence_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid",
+      "description": "The snapshot the server captured for this scan, or null before capture ran. It is a server side capture, never anything the client sent."
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Model identifier recorded on the scan row when it was queued, for example gpt-5-mini."
+    },
+    "prompt_version": {
+      "type": "string",
+      "pattern": "^detection_prompt\\.v[0-9]+\\+sha256:[0-9a-f]{12}$",
+      "description": "Prompt name plus the first 12 hex characters of the sha256 of the prompt file. Changing one character of the prompt changes this string, so two different prompts can never share a name in the corpus."
+    },
+    "requested_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the scan row was created, ISO 8601 with a timezone."
+    },
+    "checked_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "When the scan reached done or failed, and null while it is queued or running. A failed scan carries a checked_at and still carries no verdict."
+    },
+    "parse_ok": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Whether the model response validated against the frozen llm_output.v1 schema. null means no prediction row exists yet, which a failed scan also carries when the worker threw before the model was ever called."
+    },
+    "parse_failure_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "no_json",
+        "truncated",
+        "refused_missing_html",
+        "api_error",
+        null
+      ],
+      "description": "Why the response did not parse. The four values are the ones frozen in the eval repo's scripts/parsing.py and nothing else is ever emitted."
+    },
+    "failure": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Why the scan failed, as an open set of stable tokens: capture_* when the page could not be fetched, model_* when the provider call failed, parse_* when the response did not validate, worker_* when the background task threw before it could record anything, and scan_abandoned when the worker never finished. A failed scan always carries a token here, never null."
+    }
+  },
+  "allOf": [
+    {
+      "description": "A verdict exists only when the scan finished and its response parsed. Anything else carries three nulls, so a client that reads is_scam without checking status still cannot mistake an unfinished scan for a clean site.",
+      "if": {
+        "type": "object",
+        "required": [
+          "status",
+          "parse_ok"
+        ],
+        "properties": {
+          "status": {
+            "const": "done"
+          },
+          "parse_ok": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "is_scam": {
+            "type": "boolean"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "confidence_basis": {
+            "type": "string"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "is_scam": {
+            "const": null
+          },
+          "confidence": {
+            "const": null
+          },
+          "confidence_basis": {
+            "const": null
+          }
+        }
+      }
+    }
+  ]
+}

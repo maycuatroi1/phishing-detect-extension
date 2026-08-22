@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "note": "So khớp byte của hai file seam mà repo này vendor từ phishing-detect-web. Hai file đó là hợp đồng API thật; code trong src/ theo bản vendor chứ không theo trí nhớ. Chạy lại bằng `pnpm --filter extension check:vendor`, và nó cũng là bước đầu của `pnpm --filter extension build` lẫn `pnpm --filter extension test:contract`.",
+  "policy": "Một digest ở đây chỉ được đổi trong đúng commit copy lại file từ repo owner, và chỉ cho thay đổi additive. Nếu digest lệch thì seam đã đổi: đọc diff của bản upstream trước, đừng sửa digest cho hết đỏ.",
+  "line_endings": "Cả hai file là LF thuần. `.gitattributes` của repo này có dòng `vendor/** -text`, nên git không được phép normalise chúng sang CRLF trên Windows. Đó là lý do thư mục này tên là vendor/.",
+  "owner_repo": "phishing-detect-web",
+  "owner_commit": "73b7e8d249dc6d843376e7f659e83d3f00954b0c",
+  "contracts": {
+    "public-api": {
+      "seam": "public-api",
+      "owner": "phishing-detect-web",
+      "source_path": "openapi/public.yaml",
+      "path": "vendor/openapi/public.yaml",
+      "algorithm": "sha256",
+      "digest": "dae4f510ae2107e4c2abca4b39f86dcb8c83f27f89ee2214c793d86d09634783",
+      "bytes": 51886,
+      "line_ending": "lf",
+      "change_policy": "additive-until-support-floor"
+    },
+    "verdict-envelope": {
+      "seam": "verdict-envelope",
+      "owner": "phishing-detect-web",
+      "source_path": "schemas/verdict.schema.json",
+      "path": "vendor/schemas/verdict.schema.json",
+      "algorithm": "sha256",
+      "digest": "6f7176fc62afc2f88420820a2e9d65e9faed935129aca9eb2d634c51fb8673dd",
+      "bytes": 6552,
+      "line_ending": "lf",
+      "change_policy": "additive-until-support-floor"
+    }
+  }
+}

@@ -98,27 +98,116 @@ sai làm người ta bực; chặn sai làm người ta gỡ extension và khôn
 
 ## Quyền trong manifest
 
-`public/manifest.json` hiện **không xin quyền nào**: không `permissions`, không `host_permissions`,
-không content script. Đúng như vậy vì chưa có tier phát hiện nào được viết.
-
 Luật khi thêm quyền: mỗi quyền vào manifest cùng lúc với tính năng dùng nó, không sớm hơn, và
 commit thêm quyền phải nói rõ tính năng nào cần và tại sao không làm được nếu thiếu. Chrome Web
 Store review theo quyền, và một quyền xin trước khi có tính năng là một quyền không giải thích được.
 
-Bốn tier sẽ tới ở các bước sau của plan `anti-fraud-he-thong-song`:
+Tier 0 là tính năng đầu tiên, nên nó là lô quyền đầu tiên. Ba quyền, mỗi quyền một lý do:
 
-- Tier 0 `GET /v1/blocklist`, tra cục bộ, không chạm mạng khi duyệt web.
+- `alarms`. Artifact blocklist được cập nhật mỗi ngày một lần bằng `chrome.alarms`. Service worker
+  MV3 bị Chrome giết sau vài chục giây rảnh, nên `setInterval` không sống nổi tới lần chạy sau.
+  `chrome.alarms` là API duy nhất trong MV3 đánh thức được service worker theo lịch. Không có nó thì
+  artifact chỉ được làm mới khi trình duyệt khởi động lại, tức là có máy giữ danh sách cũ hàng tuần.
+- `tabs`. Để tra một trang, extension cần **host** của trang đó. Không có `tabs` thì trường `url`
+  trong `chrome.tabs.Tab` và trong `changeInfo` của `chrome.tabs.onUpdated` bị Chrome trả về
+  `undefined`, nên không có gì để băm. `activeTab` không thay được vì nó chỉ mở ra sau một cú bấm của
+  người dùng, mà tier 0 phải cảnh báo lúc trang vừa mở chứ không phải lúc người ta đã kịp nhập mật
+  khẩu. `webNavigation` cũng thay được về mặt kỹ thuật nhưng nó rộng hơn: nó phát mọi sự kiện điều
+  hướng của mọi frame. Extension chỉ cần URL của tab, nên xin đúng phần đó.
+- `host_permissions: https://anti-fraud.omelet.tech/*`. `GET /v1/blocklist` không trả header CORS,
+  nên fetch từ service worker sang origin đó bị chặn nếu origin không nằm trong `host_permissions`.
+  Đây là một origin duy nhất, không phải `<all_urls>`, và nó chỉ dùng cho một request: tải artifact.
+  Nếu ghi đè `PUBLIC_API_BASE_URL` sang origin khác thì phải sửa `host_permissions` cho khớp, nếu
+  không fetch sẽ chết ngay khi chạy.
+
+Ba thứ **cố ý vẫn không xin**: không content script, không `storage` (IndexedDB không cần quyền),
+không `<all_urls>`. Extension không bao giờ đọc nội dung trang ở tier 0; nó chỉ băm host.
+
+Bốn tier của plan `anti-fraud-he-thong-song`:
+
+- Tier 0 `GET /v1/blocklist`, tra cục bộ, không chạm mạng khi duyệt web. **Đã có.**
 - Tier 1 `GET /v1/lookup`, k-anonymity trên 20 bit đầu của `SHA256(host)`, không gắn auth.
 - Tier 2 `POST /v1/scan` cộng `GET /v1/scan/{scan_id}`, chỉ chạy khi người dùng bấm.
 - Tier 3 `POST /v1/report`, khai báo của người dùng, không bao giờ là nhãn.
 
 `POST /v1/install` cấp install token cho tier 2 và tier 3, không thuộc tier nào.
 
+## Tier 0
+
+Tier 0 tải một artifact nhị phân về máy rồi tra hoàn toàn cục bộ. Duyệt web **không phát ra request
+nào**. Đó là toàn bộ lý do extension này qua được review, nên đừng đổi nó thành một lần gọi mạng cho
+tiện.
+
+Đường đi:
+
+1. `chrome.alarms` đánh thức service worker mỗi 1440 phút, cộng một lần lúc `onInstalled` và một lần
+   lúc `onStartup`.
+2. `syncBlocklist` gọi `GET /v1/blocklist?format=1&since=<version đang giữ>`. Tên tham số là
+   **`since`**, không phải `have`; `have` bị server bỏ qua và trả về nguyên artifact.
+3. 304 nghĩa là byte không đổi: giữ nguyên entry, chỉ làm mới `etag`, `pinnedUrl` và `fetchedAt`.
+4. 200 thì decode 18 byte header, so `x-blocklist-format` và `x-blocklist-version` với byte 4 và
+   byte 6. Lệch là từ chối.
+5. Ghi vào IndexedDB `anti-fraud-blocklist`, object store `artifact`, đúng một bản ghi khoá
+   `current`, entry là hai `BigUint64Array` đã sắp xếp.
+6. `chrome.tabs.onUpdated` và `onActivated` lấy URL, `hostOfUrl` rút host, `hostEntryOf` băm
+   SHA-256 rồi lấy 16 ký tự hex đầu thành uint64, `afblContains` tìm nhị phân, `paintBadge` sơn badge
+   theo tab.
+
+### Artifact hỏng thì giữ bản cũ
+
+Đây là chữ trong plan và có test cho cả ba đường trong `tests/contract/blocklist-refuse.test.ts`:
+
+- Từ chối và **giữ bản cũ**: bản ghi trong IndexedDB không đổi một byte, kể cả `fetchedAt`.
+- **Không fail open**: sau khi từ chối, host lừa đảo trong bản cũ vẫn ra `phishing`. Coi như sạch là
+  cách tệ nhất để hỏng.
+- **Không fail closed**: sau khi từ chối, host lạ vẫn ra `unknown`. Cảnh báo tất cả cũng là hỏng, chỉ
+  hỏng theo hướng làm người dùng gỡ extension.
+
+Sáu mã từ chối: `too_short`, `bad_magic`, `unsupported_format`, `truncated_body`, `trailing_bytes`,
+`unsorted_entries`. Mạng chết hoặc HTTP 4xx/5xx cũng là giữ bản cũ, không phải xoá bản cũ.
+
+Artifact **rỗng** (đúng 18 byte, 0 entry) là một câu trả lời hợp lệ chứ không phải lỗi. Production
+đang trả đúng thế vì cả corpus còn ở trạng thái `pending`: dự đoán của model không phải nhãn, nhãn
+chỉ sinh ra qua moderation console.
+
+### Version là số thứ tự thay đổi nội dung, không phải đồng hồ
+
+Từ commit `73b7e8d` của `phishing-detect-web`, version của artifact **derive từ byte của artifact**,
+không derive từ timestamp của corpus. Vẫn là uint32 tăng dần ở byte 6, layout không đổi một byte.
+
+Hai điều client phải tôn trọng:
+
+- Chỉ được so **mới hơn hoặc bằng**. Không được suy ra thời điểm dựng, không được tính tuổi artifact
+  từ version. Muốn biết bản đang giữ cũ bao lâu thì đọc `fetchedAt`, là đồng hồ của máy người dùng.
+- Corpus quay về nội dung cũ sẽ nhận **version mới cao hơn**, không quay lại version cũ. Client phải
+  nhận bản đó chứ không được đòi version cũ.
+
+`tests/contract/blocklist-version.test.ts` khoá cả hai lại, và nó có một vế quét toàn bộ `src/`: bất
+kỳ dòng nào vừa nhắc `version` vừa có `new Date(`, `Date.now()`, `Date.parse(`, `toISOString(`,
+`getTime()`, `* 1000` hay `/ 1000` đều làm test đỏ kèm tên file và số dòng. Nếu bạn đang đọc dòng này
+vì test đó vừa đỏ: version không phải timestamp, đừng sửa test.
+
+## Hai file seam vendor
+
+`vendor/openapi/public.yaml` và `vendor/schemas/verdict.schema.json` là **byte copy** của hợp đồng
+thật trong `phishing-detect-web`. Từ tier 0 trở đi, bản vendor là thứ code theo, không phải trí nhớ.
+
+`vendor/VENDORED.json` là sổ ghi digest. `pnpm --filter extension check:vendor` rehash và fail nếu
+lệch; nó là bước đầu tiên của cả `build` lẫn `test:contract`, nên không có đường build xanh mà seam
+đã đổi.
+
+Thư mục tên `vendor/` là có chủ ý: `.gitattributes` có dòng `vendor/** -text`, nên git không được
+normalise hai file này sang CRLF trên Windows. Repo web đã mất nửa ngày vì Nixpacks nuốt CRLF làm
+digest lệch; đừng đặt file seam ra ngoài `vendor/` mà không kèm luật `-text` tương ứng.
+
+Đổi digest trong `vendor/VENDORED.json` chỉ hợp lệ trong đúng commit copy lại file từ repo owner, và
+chỉ cho thay đổi additive. Một digest lệch nghĩa là seam đã đổi: đọc diff của bản upstream trước.
+
 ## Hợp đồng API
 
 Hợp đồng thật nằm ở `openapi/public.yaml` và `schemas/verdict.schema.json` trong
-`phishing-detect-web`. Repo này **chưa vendor** chúng. Bước tier 0 mới vendor kèm check băm, và từ
-lúc đó bản vendor là thứ code theo, không phải trí nhớ.
+`phishing-detect-web`, và repo này giữ một byte copy trong `vendor/` kèm check băm. Xem mục "Hai file
+seam vendor" ở trên.
 
 Origin production không được hardcode rải rác. Nó là mặc định duy nhất trong `src/config.ts` và bị
 `PUBLIC_API_BASE_URL` ghi đè. Nguồn sự thật về nơi service chạy là `deployments.yaml` ở harness root.
@@ -139,11 +228,13 @@ Hai script tương đương: kiểm tra node và pnpm, copy `.env.example` sang 
 Sau khi init:
 
 ```sh
-pnpm --filter extension build             # vite build cộng post-check chặn secret
+pnpm --filter extension build             # check băm vendor, vite build, post-check chặn secret
+pnpm --filter extension check:vendor      # chỉ rehash hai file seam trong vendor/
 pnpm --filter extension check:no-secrets  # chỉ chạy post-check trên dist/ hiện có
 pnpm --filter extension lint:no-blocking  # manifest và source không được chặn điều hướng
 pnpm --filter extension typecheck         # tsc --noEmit
-pnpm --filter extension test              # vitest
+pnpm --filter extension test              # vitest, toàn bộ
+pnpm --filter extension test:contract     # check băm vendor cộng tests/contract
 ```
 
 Repo đứng một mình nhưng vẫn có `pnpm-workspace.yaml` với `packages: [.]` và `name: "extension"`
@@ -155,16 +246,35 @@ trong `package.json`, để lệnh `pnpm --filter extension ...` mà plan và CI
 `chrome://extensions` bật Developer mode, "Load unpacked", trỏ vào `dist/`. Không phải gốc repo:
 `manifest.json` nằm trong `public/` và chỉ trở thành gốc extension sau khi build copy nó ra `dist/`.
 
+Muốn tự tay xem badge đổi: `pnpm --filter extension test` đã chứng minh vế đó bằng artifact fixture
+trong `tests/tier0-badge.test.ts`. Trên production hiện **chưa** ghé được domain nào có trong
+blocklist, vì artifact production đang rỗng: cả corpus còn `pending`, chưa có site nào được
+moderation console gán `confirmed_phishing` hay `confirmed_legit`. Khi có nhãn đầu tiên thì mở
+`chrome://extensions`, xem service worker, chạy `refreshBlocklist()`, rồi ghé domain đó và mở tab
+Network: badge đổi mà Network trống.
+
 ## Bố cục
 
 ```
-public/manifest.json      manifest MV3, copy nguyên trạng vào dist/
-public/icons/             icon 16, 48, 128
-src/config.ts             origin API, đọc PUBLIC_API_BASE_URL
-src/background/index.ts   service worker MV3
-src/popup/                popup action
+public/manifest.json          manifest MV3, copy nguyên trạng vào dist/
+public/icons/                 icon 16, 48, 128
+vendor/VENDORED.json          sổ digest của hai file seam
+vendor/openapi/public.yaml    byte copy hợp đồng API, LF thuần
+vendor/schemas/               byte copy schema verdict, LF thuần
+src/config.ts                 origin API, đọc PUBLIC_API_BASE_URL
+src/lib/afbl.ts               layout AFBL, decode, tìm nhị phân
+src/lib/host.ts               URL thành host, host thành entry uint64
+src/lib/blocklist-store.ts    IndexedDB, đúng một bản ghi
+src/lib/blocklist-sync.ts     tải, kiểm, quyết định nhận hay giữ bản cũ
+src/lib/tier0.ts              tra cục bộ, có cache trong bộ nhớ
+src/background/tier0.ts       alarm, listener tab, sơn badge
+src/background/index.ts       service worker MV3, chỉ đăng ký
+src/popup/                    popup action
+scripts/check-vendor-hash.ts  rehash vendor/, cổng của build và test:contract
+scripts/vendor-ledger.ts      đọc và kiểm sổ digest
 scripts/check-no-secrets.ts   post-check sau build
 scripts/secret-patterns.ts    tám pattern secret, có test riêng
 scripts/lint-no-blocking.ts   cưỡng chế invariant no-blocking
-tests/                    vitest
+tests/contract/               hợp đồng seam, layout AFBL, version, production thật
+tests/                        vitest phần còn lại
 ```

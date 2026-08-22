@@ -1,0 +1,1364 @@
+openapi: 3.1.0
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+
+info:
+  title: anti-fraud public API
+  version: 1.0.0
+  summary: The seven public operations a browser extension is allowed to call.
+  description: >-
+    Four detection tiers, seven operations. Tier 0 is GET /v1/blocklist, a binary artifact the
+    client downloads and searches locally without touching the network again. Tier 1 is
+    GET /v1/lookup, k-anonymity over the first 20 bits of SHA256(host), unauthenticated and never
+    logged next to a client identifier. Tier 2 is POST /v1/scan plus GET /v1/scan/{scan_id}, which
+    spends an LLM call and therefore costs quota. Tier 3 is POST /v1/report, a user claim, which is
+    never a label. POST /v1/install mints the opaque token the two authenticated tiers are metered
+    against.
+
+
+    This document is the contract, not a description of it. A client codes against this file; the
+    server is checked against this file. Every change must be additive until the oldest supported
+    extension version drops below the support floor, because an extension on the Chrome Web Store
+    review queue can lag production by days.
+
+
+    Three error shapes live behind this API and they are deliberately not merged.
+    /v1/lookup and /v1/blocklist answer with their own narrow code sets because they are
+    unauthenticated and have no token, quota or body to talk about. /v1/install, /v1/report and
+    /v1/scan answer with the shared code set that can also carry retry_after and reset_at.
+  contact:
+    name: phishing-detect-web
+    url: https://github.com/phishing-detect/phishing-detect-web
+  license:
+    name: UNLICENSED
+    identifier: LicenseRef-proprietary
+
+servers:
+  - url: "{origin}"
+    description: >-
+      The origin is deployment data, not contract data. The single source of truth for the real
+      host is deployments.yaml at the harness root; this file must never hardcode it. The default
+      below is the local development server that init.sh brings up.
+    variables:
+      origin:
+        default: http://localhost:3000
+
+tags:
+  - name: blocklist
+    description: Tier 0. Binary artifact, no authentication, cached hard and pinned by version.
+  - name: lookup
+    description: Tier 1. k-anonymity prefix lookup, no authentication, no client identifier logged.
+  - name: scan
+    description: Tier 2. One LLM call per scan, metered against an install token.
+  - name: report
+    description: Tier 3. A user claim about a site. A report is never a label.
+  - name: install
+    description: Mints the opaque install token that meters tier 2 and tier 3.
+
+security: []
+
+paths:
+  /v1/lookup:
+    get:
+      tags: [lookup]
+      operationId: lookupPrefixes
+      summary: Return every corpus entry that falls in the given hash buckets.
+      description: >-
+        The client hashes the host with SHA256, takes the first five hex characters, and sends that
+        as p. The server answers with the whole bucket, so it never learns which host inside the
+        bucket the client cared about. Up to 16 buckets may be asked for in one request. The
+        rejected value of a malformed p is never echoed back and never logged, and no request to
+        this endpoint ever writes a prefix and a client address on the same log line.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/LookupPrefix"
+      responses:
+        "200":
+          description: >-
+            One entry per key in the request, in the order the keys were sent, keyed by the exact
+            string the client sent rather than a normalised form. A bucket with no corpus entries
+            comes back as an empty array, which is not the same answer as unknown.
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/NoSniff"
+            X-Lookup-Anonymity:
+              description: Restates the privacy property this endpoint is built around.
+              schema:
+                type: string
+                const: k-anonymity; no authentication; client identifiers not logged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LookupResponse"
+              examples:
+                oneKnownPhish:
+                  summary: One bucket holding a single confirmed phishing host.
+                  value:
+                    buckets:
+                      00a1f:
+                        - h: 00a1f2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f
+                          v: phishing
+                          c: 1
+        "400":
+          $ref: "#/components/responses/LookupBadRequest"
+        "500":
+          $ref: "#/components/responses/LookupInternal"
+
+  /v1/blocklist:
+    get:
+      tags: [blocklist]
+      operationId: getBlocklist
+      summary: Download the current AFBL artifact.
+      description: >-
+        Returns the whole artifact as application/octet-stream. The layout is AFBL: a magic of
+        "AFBL", a uint16 format, a uint32 version, a uint32 phish count and a uint32 legit count,
+        all little endian, followed by phish entries then legit entries as little endian uint64,
+        each entry being the first 16 hex characters of SHA256(host). Both arrays are strictly
+        ascending so a client can binary search them. A client that cannot parse the format it is
+        handed must keep the artifact it already has rather than fail open.
+
+
+        The version names the bytes, not the moment they were built. It is derived from the
+        artifact body, so a write to the corpus that does not change a single entry leaves the
+        version, the ETag and the pinned URL exactly where they were and a cached copy stays
+        valid. The version never goes backwards and advances by one each time the bytes change.
+        Pin the exact bytes with the URL in the x-blocklist-pinned-url header, which is immutable
+        and cacheable for a year.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/BlocklistFormat"
+        - $ref: "#/components/parameters/BlocklistSince"
+      responses:
+        "200":
+          description: The artifact.
+          headers:
+            ETag:
+              $ref: "#/components/headers/BlocklistEtag"
+            Cache-Control:
+              description: Short lived at the edge; the pinned URL is the one to cache hard.
+              schema:
+                type: string
+                const: public, max-age=0, s-maxage=60, stale-while-revalidate=300
+            Vary:
+              $ref: "#/components/headers/BlocklistVary"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/NoSniff"
+            X-Blocklist-Format:
+              $ref: "#/components/headers/BlocklistFormatHeader"
+            X-Blocklist-Version:
+              $ref: "#/components/headers/BlocklistVersionHeader"
+            X-Blocklist-Phish-Count:
+              $ref: "#/components/headers/BlocklistPhishCount"
+            X-Blocklist-Legit-Count:
+              $ref: "#/components/headers/BlocklistLegitCount"
+            X-Blocklist-Pinned-Url:
+              $ref: "#/components/headers/BlocklistPinnedUrl"
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                contentMediaType: application/octet-stream
+                contentEncoding: binary
+        "304":
+          description: >-
+            since equalled the current version, so there is nothing to ship. The body is empty and
+            the same version headers are present, so a client can refresh its metadata without
+            re-downloading the entries.
+          headers:
+            ETag:
+              $ref: "#/components/headers/BlocklistEtag"
+            X-Blocklist-Format:
+              $ref: "#/components/headers/BlocklistFormatHeader"
+            X-Blocklist-Version:
+              $ref: "#/components/headers/BlocklistVersionHeader"
+            X-Blocklist-Pinned-Url:
+              $ref: "#/components/headers/BlocklistPinnedUrl"
+        "400":
+          $ref: "#/components/responses/BlocklistBadRequest"
+
+  /v1/blocklist/v/{version}:
+    get:
+      tags: [blocklist]
+      operationId: getPinnedBlocklist
+      summary: Download one exact artifact version.
+      description: >-
+        Same bytes as GET /v1/blocklist when version is the current version, served under an
+        immutable year long cache header. Past versions are not retained: the artifact is derived
+        from the corpus at request time, so a version that is no longer current cannot be rebuilt
+        and the server answers 404 rather than shipping different bytes under a pinned URL.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/BlocklistVersionPath"
+        - $ref: "#/components/parameters/BlocklistFormat"
+      responses:
+        "200":
+          description: The artifact for that exact version.
+          headers:
+            ETag:
+              $ref: "#/components/headers/BlocklistEtag"
+            Cache-Control:
+              description: A pinned version is immutable, so it is cacheable for a year.
+              schema:
+                type: string
+                const: public, max-age=31536000, s-maxage=31536000, immutable
+            Vary:
+              $ref: "#/components/headers/BlocklistVary"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/NoSniff"
+            X-Blocklist-Format:
+              $ref: "#/components/headers/BlocklistFormatHeader"
+            X-Blocklist-Version:
+              $ref: "#/components/headers/BlocklistVersionHeader"
+            X-Blocklist-Phish-Count:
+              $ref: "#/components/headers/BlocklistPhishCount"
+            X-Blocklist-Legit-Count:
+              $ref: "#/components/headers/BlocklistLegitCount"
+            X-Blocklist-Pinned-Url:
+              $ref: "#/components/headers/BlocklistPinnedUrl"
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                contentMediaType: application/octet-stream
+                contentEncoding: binary
+        "400":
+          $ref: "#/components/responses/BlocklistBadRequest"
+        "404":
+          $ref: "#/components/responses/BlocklistVersionNotCurrent"
+
+  /v1/install:
+    post:
+      tags: [install]
+      operationId: createInstallToken
+      summary: Mint an opaque install token.
+      description: >-
+        Takes nothing at all. The token identifies an installation for quota accounting only, so
+        there is no field a caller could usefully send, and a body carrying one is refused whole
+        rather than ignored. The server stores only the SHA-256 of the token, so a token that is
+        lost cannot be recovered and a leaked database does not hand out working tokens.
+      security: []
+      requestBody:
+        required: false
+        description: Empty, or the two bytes {}. Anything else is refused.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmptyBody"
+      responses:
+        "201":
+          description: A fresh token.
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/NoSniff"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstallResponse"
+              examples:
+                minted:
+                  summary: A minted token and how long to keep it.
+                  value:
+                    install_token: aft1_EXAMPLE_ONLY_this_is_not_a_real_token_00000
+                    rotate_after_days: 90
+        "400":
+          $ref: "#/components/responses/InstallInvalidBody"
+        "413":
+          $ref: "#/components/responses/BodyTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/report:
+    post:
+      tags: [report]
+      operationId: createReport
+      summary: File a user claim about a site.
+      description: >-
+        A report is a claim, never a label. It is queued for a moderator and it never moves
+        site.status on its own. The server captures its own snapshot of the reported URL; any html
+        the client sends is stored separately as an untrusted claim by the reporter and is never
+        used as the evidence of record.
+
+
+        After REPORT_TURNSTILE_THRESHOLD reports inside the rate window the token must also carry a
+        solved Cloudflare Turnstile token. When Turnstile is not configured on the server the gate
+        degrades to open and the 202 says so in x-turnstile.
+      security:
+        - installToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportRequest"
+      responses:
+        "202":
+          description: The report is queued for moderation.
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/NoSniff"
+            X-Turnstile:
+              description: >-
+                What the Turnstile gate did. not-required means the token is below the threshold,
+                verified means a challenge was solved, not-configured means the server has no
+                Turnstile keys and let the report through anyway.
+              schema:
+                type: string
+                enum: [not-required, verified, not-configured]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportQueued"
+        "400":
+          $ref: "#/components/responses/ReportBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/TurnstileForbidden"
+        "413":
+          $ref: "#/components/responses/BodyTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          $ref: "#/components/responses/ReportRateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/TurnstileUnavailable"
+
+  /v1/scan:
+    post:
+      tags: [scan]
+      operationId: createScan
+      summary: Queue one LLM scan of one URL.
+      description: >-
+        The body carries exactly one field, url. No prompt, no html, no model, no system message,
+        no options. The server fetches the page, strips it and builds the prompt itself. That is
+        the whole defence against this endpoint becoming a free LLM proxy for the internet, and it
+        is structural rather than a rate limit, so an unknown field is a 400 and not a warning.
+
+
+        The scan is queued and answered immediately with 202. Poll GET /v1/scan/{scan_id} after
+        poll_after_seconds for the verdict.
+      security:
+        - installToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScanRequest"
+            examples:
+              onlyUrl:
+                summary: The only body this endpoint accepts.
+                value:
+                  url: https://login.example.test/account/verify
+      responses:
+        "202":
+          description: The scan is queued.
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/NoSniff"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanQueued"
+              examples:
+                queued:
+                  summary: Queued, with the quota left on this token.
+                  value:
+                    scan_id: 4f6d1c2e-9a3b-4c5d-8e7f-0a1b2c3d4e5f
+                    status: queued
+                    poll_after_seconds: 2
+                    quota_remaining: 19
+        "400":
+          $ref: "#/components/responses/ScanBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/BodyTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          $ref: "#/components/responses/ScanQuotaExceeded"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/scan/{scan_id}:
+    get:
+      tags: [scan]
+      operationId: getScanVerdict
+      summary: Read the verdict envelope for one scan.
+      description: >-
+        Always 200 with the same envelope, whether the scan is queued, running, done or failed, so
+        a client only ever parses one shape. The install token must be the one that created the
+        scan. A scan id that belongs to somebody else and a scan id that does not exist both answer
+        404 with the same body: answering 403 for a real id would confirm the id is real.
+
+
+        This read also sweeps every scan left queued or running past SCAN_STALE_SECONDS to failed,
+        so a client that polls and does nothing else still reaches a terminal state instead of
+        polling a row nobody will ever finish.
+      security:
+        - installToken: []
+      parameters:
+        - $ref: "#/components/parameters/ScanId"
+      responses:
+        "200":
+          description: The verdict envelope.
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/NoSniff"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerdictEnvelope"
+              examples:
+                stillQueued:
+                  summary: Queued, so there is no verdict and every verdict field is null.
+                  value:
+                    scan_id: 4f6d1c2e-9a3b-4c5d-8e7f-0a1b2c3d4e5f
+                    status: queued
+                    is_scam: null
+                    confidence: null
+                    confidence_basis: null
+                    source: llm
+                    site_id: 6b1e0d2a-3c4f-4a5b-9c8d-7e6f5a4b3c2d
+                    evidence_id: null
+                    model: gpt-5-mini
+                    prompt_version: detection_prompt.v2+sha256:16dff025e971
+                    requested_at: "2026-08-22T06:12:44.001Z"
+                    checked_at: null
+                    parse_ok: null
+                    parse_failure_reason: null
+                    failure: null
+                decided:
+                  summary: Finished and parsed, so the three verdict fields are populated.
+                  value:
+                    scan_id: 4f6d1c2e-9a3b-4c5d-8e7f-0a1b2c3d4e5f
+                    status: done
+                    is_scam: true
+                    confidence: 0.5
+                    confidence_basis: uncalibrated_single_vote
+                    source: llm
+                    site_id: 6b1e0d2a-3c4f-4a5b-9c8d-7e6f5a4b3c2d
+                    evidence_id: 91a2b3c4-d5e6-4f70-8192-a3b4c5d6e7f8
+                    model: gpt-5-mini
+                    prompt_version: detection_prompt.v2+sha256:16dff025e971
+                    requested_at: "2026-08-22T06:12:44.001Z"
+                    checked_at: "2026-08-22T06:12:49.442Z"
+                    parse_ok: true
+                    parse_failure_reason: null
+                    failure: null
+                unparsed:
+                  summary: >-
+                    The model answered but the answer did not validate, so the scan failed and
+                    still carries no verdict.
+                  value:
+                    scan_id: 4f6d1c2e-9a3b-4c5d-8e7f-0a1b2c3d4e5f
+                    status: failed
+                    is_scam: null
+                    confidence: null
+                    confidence_basis: null
+                    source: llm
+                    site_id: 6b1e0d2a-3c4f-4a5b-9c8d-7e6f5a4b3c2d
+                    evidence_id: 91a2b3c4-d5e6-4f70-8192-a3b4c5d6e7f8
+                    model: gpt-5-mini
+                    prompt_version: detection_prompt.v2+sha256:16dff025e971
+                    requested_at: "2026-08-22T06:12:44.001Z"
+                    checked_at: "2026-08-22T06:12:47.128Z"
+                    parse_ok: false
+                    parse_failure_reason: no_json
+                    failure: parse_no_json
+                workerCrashed:
+                  summary: >-
+                    The background task threw after the capture landed, so the scan is failed with
+                    a worker_* token and never reached a prediction.
+                  value:
+                    scan_id: 4f6d1c2e-9a3b-4c5d-8e7f-0a1b2c3d4e5f
+                    status: failed
+                    is_scam: null
+                    confidence: null
+                    confidence_basis: null
+                    source: llm
+                    site_id: 6b1e0d2a-3c4f-4a5b-9c8d-7e6f5a4b3c2d
+                    evidence_id: 91a2b3c4-d5e6-4f70-8192-a3b4c5d6e7f8
+                    model: gpt-5-mini
+                    prompt_version: detection_prompt.v2+sha256:16dff025e971
+                    requested_at: "2026-08-22T06:12:44.001Z"
+                    checked_at: "2026-08-22T06:12:46.702Z"
+                    parse_ok: null
+                    parse_failure_reason: null
+                    failure: worker_seam_mismatch
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ScanNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  securitySchemes:
+    installToken:
+      type: http
+      scheme: bearer
+      description: >-
+        The opaque token from POST /v1/install, sent as "Authorization: Bearer <token>". Shaped
+        aft1_ followed by 43 base64url characters. It is not a user identity and carries no
+        claims; it exists so quota can be counted against an installation.
+
+  parameters:
+    LookupPrefix:
+      name: p
+      in: query
+      required: true
+      style: form
+      explode: true
+      description: >-
+        The first five hex characters of SHA256(host), repeated once per host the client wants to
+        know about. Case is preserved in the response keys but matching is case insensitive.
+      schema:
+        type: array
+        minItems: 1
+        maxItems: 16
+        items:
+          type: string
+          pattern: "^[0-9a-fA-F]{5}$"
+      example: [00a1f, 5c3e0]
+
+    BlocklistFormat:
+      name: format
+      in: query
+      required: false
+      description: >-
+        The artifact format the client can parse. Omitting it means the current format. Asking for
+        a format the server does not serve is a 400 and no artifact, because a client that cannot
+        name a layout it understands must keep the artifact it already has.
+      schema:
+        type: integer
+        minimum: 0
+        maximum: 4294967295
+        default: 1
+
+    BlocklistSince:
+      name: since
+      in: query
+      required: false
+      description: >-
+        The version the client already holds. Equal to the current version means 304 and no body,
+        which is what a corpus whose shipped entries have not changed keeps answering.
+        Anything that is not a decimal uint32 is a 400 rather than a guess.
+      schema:
+        type: integer
+        minimum: 0
+        maximum: 4294967295
+
+    BlocklistVersionPath:
+      name: version
+      in: path
+      required: true
+      description: >-
+        The exact version to pin. Build this URL from the x-blocklist-pinned-url header of
+        GET /v1/blocklist rather than assembling it by hand.
+      schema:
+        type: integer
+        minimum: 0
+        maximum: 4294967295
+
+    ScanId:
+      name: scan_id
+      in: path
+      required: true
+      description: The scan_id handed back by POST /v1/scan.
+      schema:
+        type: string
+        format: uuid
+
+  headers:
+    NoStore:
+      description: Never cached. These bodies are per token or per request.
+      schema:
+        type: string
+        const: no-store
+    NoSniff:
+      description: Present on every response this API produces.
+      schema:
+        type: string
+        const: nosniff
+    BlocklistEtag:
+      description: >-
+        Derived from the format and the version, so it changes exactly when the artifact bytes
+        change and not when an unrelated row is written.
+      schema:
+        type: string
+        pattern: '^"afbl-[0-9]+-[0-9]+"$'
+    BlocklistVary:
+      description: Content negotiation is limited to transfer encoding.
+      schema:
+        type: string
+        const: accept-encoding
+    BlocklistFormatHeader:
+      description: The artifact layout in the body, matching the uint16 in the header of the bytes.
+      schema:
+        type: string
+        pattern: "^[0-9]+$"
+    BlocklistVersionHeader:
+      description: >-
+        The artifact version in the body, matching the uint32 in the header of the bytes. Monotonic
+        across the life of the service, and derived from the artifact body rather than from a
+        clock, so the same entries are always served under the same version.
+      schema:
+        type: string
+        pattern: "^[0-9]+$"
+    BlocklistPhishCount:
+      description: How many phish entries the artifact carries.
+      schema:
+        type: string
+        pattern: "^[0-9]+$"
+    BlocklistLegitCount:
+      description: How many legit entries the artifact carries.
+      schema:
+        type: string
+        pattern: "^[0-9]+$"
+    BlocklistPinnedUrl:
+      description: The immutable URL for these exact bytes.
+      schema:
+        type: string
+        pattern: "^/v1/blocklist/v/[0-9]+\\?format=[0-9]+$"
+
+  responses:
+    LookupBadRequest:
+      description: >-
+        The p parameters were missing, too many, or not five hex characters. The offending value is
+        not echoed back and is not logged.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/LookupBadRequestError"
+    LookupInternal:
+      description: The bucket could not be read. Retry later.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/LookupInternalError"
+    BlocklistBadRequest:
+      description: >-
+        format named a layout this server does not serve, or since or the pinned version segment
+        was not a decimal uint32. No artifact is returned; keep the one already held.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BlocklistBadRequestError"
+    BlocklistVersionNotCurrent:
+      description: >-
+        That version is not the current one and past artifacts are not retained. Refetch
+        GET /v1/blocklist to learn the current version and pin that instead.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BlocklistVersionNotCurrentError"
+    InstallInvalidBody:
+      description: POST /v1/install takes nothing, and the body was not nothing.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/InstallInvalidBodyError"
+    ScanBadRequest:
+      description: >-
+        The body did not parse as JSON, was not an object, carried a field other than url, or
+        carried a url that is not an absolute http or https URL without credentials. unknown_field
+        is the one to handle carefully: it means the client sent something the server refuses to
+        accept on principle, so retrying with the same body will never work.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ScanBadRequestError"
+    ReportBadRequest:
+      description: >-
+        The body did not parse, carried a field outside the accepted set, or carried a url, claim,
+        comment or html that failed validation. unknown_field means the request was refused whole
+        rather than with the unknown field dropped.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ReportBadRequestError"
+    Unauthorized:
+      description: >-
+        No install token was presented, or the token is not one this server minted. Both are 401
+        and both are fixed the same way: mint a fresh token with POST /v1/install. A revoked token
+        answers invalid_token as well.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/UnauthorizedError"
+    TurnstileForbidden:
+      description: >-
+        turnstile_required means the token crossed the threshold and must solve a challenge and
+        resend the report with turnstile_token. turnstile_failed means the token presented did not
+        verify with Cloudflare, so a fresh challenge is needed. Neither is retryable with the same
+        bytes.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ForbiddenError"
+    ScanNotFound:
+      description: >-
+        No scan with that id belongs to this install token. An id that does not exist and an id
+        belonging to another token are deliberately indistinguishable.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/NotFoundError"
+    BodyTooLarge:
+      description: The body exceeded the endpoint's limit and was refused unread.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BodyTooLargeError"
+    UnsupportedMediaType:
+      description: The endpoint accepts application/json only.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/UnsupportedMediaTypeError"
+    ScanQuotaExceeded:
+      description: >-
+        The install token spent its scan budget for the window. Both retry_after and reset_at are
+        present: retry_after is the seconds to wait and reset_at is the instant the oldest scan in
+        the window ages out. A Retry-After header carries the same number. This is the only 429 in
+        this API that carries reset_at.
+      headers:
+        Retry-After:
+          description: Seconds to wait, the same value as error.retry_after.
+          schema:
+            type: string
+            pattern: "^[0-9]+$"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/QuotaExceededError"
+          examples:
+            spent:
+              summary: Quota spent, with the instant it frees up.
+              value:
+                error:
+                  code: quota_exceeded
+                  message: >-
+                    One install token may request 20 scans per 86400 seconds. The quota frees up as
+                    the oldest scan in the window ages out; reset_at is the instant that happens.
+                  retry_after: 84213
+                  reset_at: "2026-08-23T05:44:12.000Z"
+    ReportRateLimited:
+      description: >-
+        The install token filed its allowance of reports for the window. retry_after is present and
+        reset_at is not: the report limiter reports a wait, not an instant. A client must not
+        assume reset_at exists on every 429 in this API.
+      headers:
+        Retry-After:
+          description: Seconds to wait, the same value as error.retry_after.
+          schema:
+            type: string
+            pattern: "^[0-9]+$"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/RateLimitedError"
+    TurnstileUnavailable:
+      description: >-
+        Cloudflare could not be reached to check the challenge, so the report was not queued. This
+        is the one 503 in this API and it is retryable: retry_after says how long to wait.
+      headers:
+        Retry-After:
+          description: Seconds to wait, the same value as error.retry_after.
+          schema:
+            type: string
+            pattern: "^[0-9]+$"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/TurnstileUnavailableError"
+    InternalError:
+      description: The server failed on its own account. Retry later; the request was not accepted.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/InternalErrorEnvelope"
+
+  schemas:
+    ApiError:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      description: >-
+        The error object used by /v1/install, /v1/report and /v1/scan. code is stable and is the
+        only field a client should branch on; message is written for a human reading a log and may
+        be reworded at any time. Neither field ever echoes back a value the client sent.
+      properties:
+        code:
+          type: string
+          enum:
+            - unsupported_media_type
+            - body_too_large
+            - invalid_json
+            - invalid_body
+            - unknown_field
+            - invalid_url
+            - invalid_claim
+            - invalid_comment
+            - invalid_html
+            - missing_token
+            - invalid_token
+            - rate_limited
+            - quota_exceeded
+            - turnstile_required
+            - turnstile_failed
+            - not_found
+            - internal_error
+        message:
+          type: string
+          minLength: 1
+        retry_after:
+          type: integer
+          minimum: 1
+          description: Seconds to wait before retrying. Present only on 429 and on the 503.
+        reset_at:
+          type: string
+          format: date-time
+          description: >-
+            The instant the limit frees up. Present only on the 429 from POST /v1/scan.
+
+    ScanBadRequestError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          allOf:
+            - $ref: "#/components/schemas/ApiError"
+            - properties:
+                code:
+                  enum: [invalid_json, invalid_body, unknown_field, invalid_url]
+
+    ReportBadRequestError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          allOf:
+            - $ref: "#/components/schemas/ApiError"
+            - properties:
+                code:
+                  enum:
+                    - invalid_json
+                    - invalid_body
+                    - unknown_field
+                    - invalid_url
+                    - invalid_claim
+                    - invalid_comment
+                    - invalid_html
+
+    InstallInvalidBodyError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          allOf:
+            - $ref: "#/components/schemas/ApiError"
+            - properties:
+                code:
+                  const: invalid_body
+
+    UnauthorizedError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          allOf:
+            - $ref: "#/components/schemas/ApiError"
+            - properties:
+                code:
+                  enum: [missing_token, invalid_token]
+
+    ForbiddenError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          allOf:
+            - $ref: "#/components/schemas/ApiError"
+            - properties:
+                code:
+                  enum: [turnstile_required, turnstile_failed]
+
+    NotFoundError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          allOf:
+            - $ref: "#/components/schemas/ApiError"
+            - properties:
+                code:
+                  const: not_found
+
+    BodyTooLargeError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          allOf:
+            - $ref: "#/components/schemas/ApiError"
+            - properties:
+                code:
+                  const: body_too_large
+
+    UnsupportedMediaTypeError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          allOf:
+            - $ref: "#/components/schemas/ApiError"
+            - properties:
+                code:
+                  const: unsupported_media_type
+
+    QuotaExceededError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          allOf:
+            - $ref: "#/components/schemas/ApiError"
+            - required: [code, message, retry_after, reset_at]
+              properties:
+                code:
+                  const: quota_exceeded
+
+    RateLimitedError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          allOf:
+            - $ref: "#/components/schemas/ApiError"
+            - required: [code, message, retry_after]
+              properties:
+                code:
+                  const: rate_limited
+
+    TurnstileUnavailableError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          allOf:
+            - $ref: "#/components/schemas/ApiError"
+            - required: [code, message, retry_after]
+              properties:
+                code:
+                  const: turnstile_failed
+
+    InternalErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          allOf:
+            - $ref: "#/components/schemas/ApiError"
+            - properties:
+                code:
+                  const: internal_error
+
+    LookupError:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      description: >-
+        The error object of GET /v1/lookup. Narrower than ApiError on purpose: this endpoint has no
+        token, no quota and no body, so it has nothing to say about retry_after or reset_at.
+      properties:
+        code:
+          type: string
+          enum: [missing_prefix, too_many_prefixes, invalid_prefix, internal_error]
+        message:
+          type: string
+          minLength: 1
+
+    LookupBadRequestError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          allOf:
+            - $ref: "#/components/schemas/LookupError"
+            - properties:
+                code:
+                  enum: [missing_prefix, too_many_prefixes, invalid_prefix]
+
+    LookupInternalError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          allOf:
+            - $ref: "#/components/schemas/LookupError"
+            - properties:
+                code:
+                  const: internal_error
+
+    BlocklistError:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      description: >-
+        The error object of the two blocklist endpoints. Narrower than ApiError for the same reason
+        as LookupError, and with its own code set because a blocklist client's only correct
+        recovery is to keep the artifact it already holds.
+      properties:
+        code:
+          type: string
+          enum: [unsupported_format, invalid_since, invalid_version, version_not_current]
+        message:
+          type: string
+          minLength: 1
+
+    BlocklistBadRequestError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          allOf:
+            - $ref: "#/components/schemas/BlocklistError"
+            - properties:
+                code:
+                  enum: [unsupported_format, invalid_since, invalid_version]
+
+    BlocklistVersionNotCurrentError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          allOf:
+            - $ref: "#/components/schemas/BlocklistError"
+            - properties:
+                code:
+                  const: version_not_current
+
+    LookupEntry:
+      type: object
+      additionalProperties: false
+      required: [h, v, c]
+      description: One corpus entry inside a bucket. Field names are short because buckets are wide.
+      properties:
+        h:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: The full SHA256(host), lowercase hex. The client matches this against its own.
+        v:
+          type: string
+          enum: [phishing, legit, unknown]
+          description: >-
+            The corpus verdict. unknown is a real answer and means the corpus holds the host but
+            has not decided about it, which is not the same as the host being absent.
+        c:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: >-
+            1 for a confirmed status and 0 for anything else. It is a confirmed flag, not a
+            calibrated probability.
+
+    LookupResponse:
+      type: object
+      additionalProperties: false
+      required: [buckets]
+      properties:
+        buckets:
+          type: object
+          description: >-
+            Keyed by the exact p string the client sent, including its original letter case. A
+            bucket with no entries is an empty array.
+          propertyNames:
+            pattern: "^[0-9a-fA-F]{5}$"
+          additionalProperties:
+            type: array
+            items:
+              $ref: "#/components/schemas/LookupEntry"
+
+    EmptyBody:
+      type: object
+      additionalProperties: false
+      maxProperties: 0
+      description: An object with no properties. POST /v1/install accepts this or no body at all.
+
+    InstallResponse:
+      type: object
+      additionalProperties: false
+      required: [install_token, rotate_after_days]
+      properties:
+        install_token:
+          type: string
+          pattern: "^aft1_[A-Za-z0-9_-]{43}$"
+          description: >-
+            Store it once; the server keeps only its SHA-256 and cannot return it again. Treat it
+            as a secret: anyone holding it spends this installation's quota.
+        rotate_after_days:
+          type: integer
+          minimum: 1
+          description: How many days to keep a token before minting a fresh one.
+
+    ScanRequest:
+      type: object
+      additionalProperties: false
+      required: [url]
+      description: >-
+        Exactly one field. Adding any field that could reach the model input turns this endpoint
+        into a free LLM proxy, so the server refuses the whole request rather than dropping the
+        extra field.
+      properties:
+        url:
+          type: string
+          format: uri
+          minLength: 1
+          maxLength: 2048
+          description: >-
+            An absolute http or https URL carrying a host and no userinfo. Credentials embedded in
+            a URL are refused so they never reach the corpus, a server side fetch or a prompt.
+
+    ScanQueued:
+      type: object
+      additionalProperties: false
+      required: [scan_id, status, poll_after_seconds, quota_remaining]
+      properties:
+        scan_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          const: queued
+        poll_after_seconds:
+          type: integer
+          minimum: 0
+          description: How long to wait before the first GET /v1/scan/{scan_id}.
+        quota_remaining:
+          type: integer
+          minimum: 0
+          description: Scans left on this install token inside the current window.
+
+    ReportRequest:
+      type: object
+      additionalProperties: false
+      required: [url, claim]
+      description: >-
+        Any field outside this set is refused whole. html is a claim by the reporter and is stored
+        apart from the server's own snapshot; it is never treated as evidence.
+      properties:
+        url:
+          type: string
+          format: uri
+          minLength: 1
+          maxLength: 2048
+          description: An absolute http or https URL carrying a host and no userinfo.
+        claim:
+          type: string
+          enum: [phishing, false_positive]
+          description: What the reporter says about the site. It is a claim, never a label.
+        comment:
+          type: ["string", "null"]
+          maxLength: 2000
+          description: Free text from the reporter. No NUL characters.
+        html:
+          type: ["string", "null"]
+          description: >-
+            At most 131072 bytes of page html as the reporter saw it, stored as an untrusted claim.
+            No NUL characters. A bigger one buys nothing because it is never the snapshot.
+        turnstile_token:
+          type: ["string", "null"]
+          description: >-
+            A solved Cloudflare Turnstile token. Required only after the report threshold for this
+            install token has been crossed, which the server signals with 403 turnstile_required.
+
+    ReportQueued:
+      type: object
+      additionalProperties: false
+      required: [report_id, status]
+      properties:
+        report_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          const: queued
+          description: >-
+            The report is queued for a moderator. It has changed nothing about the site yet, and it
+            may never change anything.
+
+    VerdictEnvelope:
+      title: VerdictEnvelope
+      description: >-
+        The one body GET /v1/scan/{scan_id} returns at every stage of a scan, including while it is
+        still queued. The endpoint answers 200 with this shape whether the scan is queued, running,
+        done or failed, so a client only ever parses one shape. Built by buildVerdictEnvelope() in
+        src/lib/verdict.ts; this file and that function must agree byte for byte in field names.
+      type: object
+      additionalProperties: false
+      required:
+        - scan_id
+        - status
+        - is_scam
+        - confidence
+        - confidence_basis
+        - source
+        - site_id
+        - evidence_id
+        - model
+        - prompt_version
+        - requested_at
+        - checked_at
+        - parse_ok
+        - parse_failure_reason
+        - failure
+      properties:
+        scan_id:
+          type: string
+          format: uuid
+          description: The scan this envelope describes. Same value the 202 from POST /v1/scan handed back.
+        status:
+          type: string
+          enum: [queued, running, done, failed]
+          description: >-
+            Lifecycle of the scan, not a judgement about the site. Only done carries a verdict. A
+            scan left queued or running past SCAN_STALE_SECONDS is swept to failed with
+            failure=scan_abandoned; the sweep runs on POST /v1/scan and on GET /v1/scan/{scan_id},
+            so a client that only polls still reaches a terminal state.
+        is_scam:
+          type: ["boolean", "null"]
+          description: >-
+            The model's boolean vote, and null unless the scan finished and its response parsed.
+            Never inferred from an unparsed response.
+        confidence:
+          type: ["number", "null"]
+          minimum: 0
+          maximum: 1
+          description: >-
+            Not a measurement. The frozen llm_output.v1 seam carries only {is_scam: bool}, so there
+            is no probability to read, and this server has not been calibrated on any corpus. Read
+            confidence_basis before using this number for anything.
+        confidence_basis:
+          type: ["string", "null"]
+          enum: [uncalibrated_single_vote, corpus_label, moderator_decision, null]
+          description: >-
+            Where the confidence came from. uncalibrated_single_vote means one boolean vote from
+            one model with no calibration behind it: show it as a soft notice, never at the weight
+            of a corpus hit.
+        source:
+          type: string
+          enum: [local, lookup, llm, human]
+          description: >-
+            Which detection tier produced the verdict. GET /v1/scan/{scan_id} always answers llm;
+            the other values exist so a client can hold verdicts from every tier in one shape.
+        site_id:
+          type: string
+          format: uuid
+          description: The corpus row for the normalised URL that was scanned.
+        evidence_id:
+          type: ["string", "null"]
+          format: uuid
+          description: >-
+            The snapshot the server captured for this scan, or null before capture ran. It is a
+            server side capture, never anything the client sent.
+        model:
+          type: string
+          minLength: 1
+          description: >-
+            Model identifier recorded on the scan row when it was queued, for example gpt-5-mini.
+        prompt_version:
+          type: string
+          pattern: "^detection_prompt\\.v[0-9]+\\+sha256:[0-9a-f]{12}$"
+          description: >-
+            Prompt name plus the first 12 hex characters of the sha256 of the prompt file. Changing
+            one character of the prompt changes this string, so two different prompts can never
+            share a name in the corpus.
+        requested_at:
+          type: string
+          format: date-time
+          description: When the scan row was created, ISO 8601 with a timezone.
+        checked_at:
+          type: ["string", "null"]
+          format: date-time
+          description: >-
+            When the scan reached done or failed, and null while it is queued or running. A failed
+            scan carries a checked_at and still carries no verdict.
+        parse_ok:
+          type: ["boolean", "null"]
+          description: >-
+            Whether the model response validated against the frozen llm_output.v1 schema. null
+            means no prediction row exists yet, which a failed scan also carries when the worker
+            threw before the model was ever called.
+        parse_failure_reason:
+          type: ["string", "null"]
+          enum: [no_json, truncated, refused_missing_html, api_error, null]
+          description: >-
+            Why the response did not parse. The four values are the ones frozen in the eval repo's
+            scripts/parsing.py and nothing else is ever emitted.
+        failure:
+          type: ["string", "null"]
+          description: >-
+            Why the scan failed, as an open set of stable tokens: capture_* when the page could not
+            be fetched, model_* when the provider call failed, parse_* when the response did not
+            validate, worker_* when the background task threw before it could record anything, and
+            scan_abandoned when the worker never finished. A failed scan always carries a token
+            here, never null.
+      allOf:
+        - description: >-
+            A verdict exists only when the scan finished and its response parsed. Anything else
+            carries three nulls, so a client that reads is_scam without checking status still
+            cannot mistake an unfinished scan for a clean site.
+          if:
+            type: object
+            required: [status, parse_ok]
+            properties:
+              status:
+                const: done
+              parse_ok:
+                const: true
+          then:
+            properties:
+              is_scam:
+                type: boolean
+              confidence:
+                type: number
+              confidence_basis:
+                type: string
+          else:
+            properties:
+              is_scam:
+                const: null
+              confidence:
+                const: null
+              confidence_basis:
+                const: null
