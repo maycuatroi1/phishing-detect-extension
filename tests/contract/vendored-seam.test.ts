@@ -7,18 +7,23 @@ import {
 } from "../../scripts/vendor-ledger.ts";
 import {
   AFBL_FORMAT,
+  AFBL_FORMATS,
   AFBL_HEADER_BYTES,
   AFBL_MAGIC,
+  AFBL_SOFT_FORMAT,
+  AFBL_SOFT_HEADER_BYTES,
   afblEtag,
   afblPinnedPath,
 } from "../../src/lib/afbl.ts";
 import {
   BLOCKLIST_FORMAT_PARAM,
   BLOCKLIST_PATH,
+  BLOCKLIST_REQUEST_FORMATS,
   BLOCKLIST_SINCE_PARAM,
   HEADER_ETAG,
   HEADER_FORMAT,
   HEADER_PINNED_URL,
+  HEADER_SOFT_COUNT,
   HEADER_VERSION,
 } from "../../src/lib/blocklist-sync.ts";
 
@@ -72,8 +77,38 @@ describe("client tier 0 nói đúng thứ tiếng mà openapi vendor mô tả", 
     expect(document.components.parameters.BlocklistSince.in).toBe("query");
   });
 
-  it("format mặc định là format mà decoder này đọc được", () => {
+  it("format mặc định là format cũ nhất, và client biết đọc đúng bộ format mà spec liệt kê", () => {
     expect(document.components.parameters.BlocklistFormat.schema.default).toBe(AFBL_FORMAT);
+    expect(document.components.parameters.BlocklistFormat.schema.enum).toEqual([1, 2]);
+    expect([...AFBL_FORMATS]).toEqual([1, 2]);
+    expect([...BLOCKLIST_REQUEST_FORMATS]).toEqual([2, 1]);
+  });
+
+  it("spec mô tả mảng mềm là mảng THỨ BA của một header 22 byte, không phải cờ trên mảng phish", () => {
+    const description: string = document.components.parameters.BlocklistFormat.description;
+    expect(description).toContain("appends a uint32");
+    expect(description).toContain("making it 22 bytes");
+    expect(description).toContain("a third array after legit");
+    expect(description).toContain("never folded into the phish array of either format");
+    expect(AFBL_SOFT_HEADER_BYTES).toBe(22);
+    expect(AFBL_SOFT_FORMAT).toBe(2);
+  });
+
+  it("spec nói thẳng entry mềm là kết luận của máy, gỡ được bằng đúng một report", () => {
+    const soft: string = document.components.headers.BlocklistSoftCount.description;
+    expect(soft).toContain("Present on format 2 and above and absent on format 1");
+    expect(soft).toContain("no moderator behind it");
+    expect(soft).toContain("warn in amber");
+
+    const path: string = document.paths[BLOCKLIST_PATH].get.description;
+    expect(path).toContain("A single user report withdraws a soft entry with no human in the");
+    expect(path).toContain("Soft hosts never appear in the phish array of any format");
+  });
+
+  it("header đếm entry mềm mà client đọc trùng tên header trong spec", () => {
+    const headers = document.paths[BLOCKLIST_PATH].get.responses["200"].headers;
+    const declared = Object.keys(headers).map((name) => name.toLowerCase());
+    expect(declared).toContain(HEADER_SOFT_COUNT);
   });
 
   it("mô tả layout AFBL đúng như decoder giả định", () => {
@@ -123,5 +158,6 @@ describe("client tier 0 nói đúng thứ tiếng mà openapi vendor mô tả", 
 
   it("header 18 byte của decoder khớp tổng các trường mà spec liệt kê", () => {
     expect(AFBL_HEADER_BYTES).toBe(4 + 2 + 4 + 4 + 4);
+    expect(AFBL_SOFT_HEADER_BYTES).toBe(4 + 2 + 4 + 4 + 4 + 4);
   });
 });

@@ -3,8 +3,10 @@ import { runGatedAutoScan, type AutoScanOutcome, type KnownVerdict } from "../li
 import { hostOfUrl } from "../lib/host.ts";
 import {
   DISMISS_HINT,
-  HARD_WARNING_TEXT,
-  REPORT_HINT,
+  MACHINE_UNVERIFIED_TEXT,
+  SOFT_REPORT_HINT,
+  SOFT_WARNING_TEXT,
+  badgeLookFor,
   paintLook,
   userAdjustedLook,
   type BadgeLook,
@@ -12,13 +14,13 @@ import {
 import { evaluateTabTiered } from "./tier1.ts";
 
 export const AUTO_SCAN_WARNING_LOOK: BadgeLook = {
-  text: HARD_WARNING_TEXT,
-  color: "#c62828",
-  title: `Anti-Fraud: trang này chưa có trong danh sách nào, nhưng điểm rủi ro của tên miền đủ cao nên extension đã tự quét sâu, và model nói đây là trang lừa đảo. Mở popup để xem những tín hiệu nào đã kích hoạt. ${REPORT_HINT} ${DISMISS_HINT}`,
+  text: SOFT_WARNING_TEXT,
+  color: badgeLookFor("soft").color,
+  title: `Anti-Fraud: trang này chưa có trong danh sách nào, nhưng điểm rủi ro của tên miền đủ cao nên extension đã tự quét sâu, và model nói đây là trang lừa đảo. ${MACHINE_UNVERIFIED_TEXT} Mở popup để xem những tín hiệu nào đã kích hoạt. ${SOFT_REPORT_HINT} ${DISMISS_HINT}`,
 };
 
 export function knownVerdictOf(verdict: string): KnownVerdict {
-  if (verdict === "phishing" || verdict === "legit") {
+  if (verdict === "phishing" || verdict === "legit" || verdict === "soft") {
     return verdict;
   }
   return "unknown";

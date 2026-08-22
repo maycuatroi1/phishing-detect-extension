@@ -9,7 +9,15 @@ export const BLOCKLIST_ALARM_NAME = "blocklist-refresh";
 
 export const HARD_WARNING_TEXT = "!";
 
+export const SOFT_WARNING_TEXT = "~";
+
+export const MACHINE_UNVERIFIED_TEXT =
+  "Trang này bị máy đánh dấu, chưa có người kiểm chứng.";
+
 export const REPORT_HINT = "Nếu đây là cảnh báo nhầm, mở popup và bấm Báo cảnh báo nhầm, đúng một cú bấm.";
+
+export const SOFT_REPORT_HINT =
+  "Với cảnh báo do máy dựng, đúng một lượt Báo cảnh báo nhầm trong popup gỡ nó cho mọi người ngay, không cần moderator.";
 
 export const DISMISS_HINT = "Trang vẫn mở bình thường, extension không chặn và không chuyển hướng. Muốn im hẳn thì mở popup và bấm Tắt cảnh báo cho trang này.";
 
@@ -23,7 +31,7 @@ export const DISPUTED_LOOK: BadgeLook = {
   text: "?",
   color: "#8d6e00",
   title:
-    "Anti-Fraud: bạn đã báo trang này bị cảnh báo nhầm, nên cảnh báo đang ở mức mềm trong lúc chờ moderator xem lại",
+    "Anti-Fraud: bạn đã báo trang này bị cảnh báo nhầm, nên extension đã hạ cảnh báo xuống mức mềm trên máy bạn. Cảnh báo do máy dựng thì một lượt báo nhầm gỡ luôn cho mọi người; cảnh báo do người xác nhận thì phải chờ moderator xem lại.",
 };
 
 export const DISMISSED_LOOK: BadgeLook = {
@@ -37,7 +45,12 @@ const BADGE_BY_VERDICT: Record<Tier0Verdict, BadgeLook> = {
   phishing: {
     text: HARD_WARNING_TEXT,
     color: "#c62828",
-    title: `Anti-Fraud: trang này nằm trong danh sách lừa đảo đã xác nhận. ${REPORT_HINT} ${DISMISS_HINT}`,
+    title: `Anti-Fraud: trang này nằm trong danh sách lừa đảo đã xác nhận, tức là một người đã xem và kết luận. ${REPORT_HINT} ${DISMISS_HINT}`,
+  },
+  soft: {
+    text: SOFT_WARNING_TEXT,
+    color: "#ef6c00",
+    title: `Anti-Fraud: ${MACHINE_UNVERIFIED_TEXT} Nó khác hẳn mức đỏ, nơi đã có một người xem và kết luận, và nó sai khoảng 3 lần trên 100. ${SOFT_REPORT_HINT} ${DISMISS_HINT}`,
   },
   legit: {
     text: "OK",
@@ -66,8 +79,12 @@ export async function paintLook(tabId: number, look: BadgeLook): Promise<void> {
   await chrome.action.setTitle({ tabId, title: look.title });
 }
 
+export function isServerWarningLook(look: BadgeLook): boolean {
+  return look.text === HARD_WARNING_TEXT || look.text === SOFT_WARNING_TEXT;
+}
+
 export async function softenIfDisputed(host: string, look: BadgeLook): Promise<BadgeLook> {
-  if (look.text !== HARD_WARNING_TEXT) {
+  if (!isServerWarningLook(look)) {
     return look;
   }
 
@@ -79,7 +96,7 @@ export async function softenIfDisputed(host: string, look: BadgeLook): Promise<B
 }
 
 export function isWarningLook(look: BadgeLook): boolean {
-  return look.text === HARD_WARNING_TEXT || look.text === DISPUTED_LOOK.text;
+  return isServerWarningLook(look) || look.text === DISPUTED_LOOK.text;
 }
 
 export async function quietIfDismissed(host: string, look: BadgeLook): Promise<BadgeLook> {
@@ -120,12 +137,16 @@ export async function refreshBlocklist(): Promise<void> {
   if (outcome.kind === "fresh") {
     invalidateTier0Cache();
     console.info(
-      "[tier0] artifact mới, version",
+      "[tier0] artifact mới, format",
+      outcome.format,
+      "version",
       outcome.version,
       "phish",
       outcome.phishCount,
       "legit",
       outcome.legitCount,
+      "soft",
+      outcome.softCount,
     );
     return;
   }

@@ -1,4 +1,11 @@
-import { AFBL_FORMAT, decodeAfbl, type AfblRefusal } from "./afbl.ts";
+import {
+  AFBL_FALLBACK_FORMAT,
+  AFBL_PREFERRED_FORMAT,
+  afblCarriesSoft,
+  decodeAfbl,
+  type AfblArtifact,
+  type AfblRefusal,
+} from "./afbl.ts";
 import {
   readStoredBlocklist,
   writeStoredBlocklist,
@@ -10,6 +17,11 @@ export const BLOCKLIST_PATH = "/v1/blocklist";
 export const BLOCKLIST_FORMAT_PARAM = "format";
 
 export const BLOCKLIST_SINCE_PARAM = "since";
+
+export const BLOCKLIST_REQUEST_FORMATS: readonly number[] = [
+  AFBL_PREFERRED_FORMAT,
+  AFBL_FALLBACK_FORMAT,
+];
 
 export const BLOCKLIST_REFRESH_PERIOD_MINUTES = 1440;
 
@@ -23,10 +35,19 @@ export const HEADER_PHISH_COUNT = "x-blocklist-phish-count";
 
 export const HEADER_LEGIT_COUNT = "x-blocklist-legit-count";
 
+export const HEADER_SOFT_COUNT = "x-blocklist-soft-count";
+
 export const HEADER_PINNED_URL = "x-blocklist-pinned-url";
 
 export type BlocklistSyncOutcome =
-  | { readonly kind: "fresh"; readonly version: number; readonly phishCount: number; readonly legitCount: number }
+  | {
+      readonly kind: "fresh";
+      readonly format: number;
+      readonly version: number;
+      readonly phishCount: number;
+      readonly legitCount: number;
+      readonly softCount: number;
+    }
   | { readonly kind: "unchanged"; readonly version: number }
   | { readonly kind: "refused"; readonly refusal: AfblRefusal; readonly keptVersion: number | null }
   | { readonly kind: "rejected_older"; readonly incomingVersion: number; readonly keptVersion: number }
@@ -42,13 +63,31 @@ export function acceptsIncomingVersion(
   return incomingVersion >= storedVersion;
 }
 
+export function acceptsIncomingArtifact(
+  stored: StoredBlocklist | null,
+  artifact: AfblArtifact,
+): boolean {
+  if (stored === null || stored.format !== artifact.format) {
+    return true;
+  }
+  return acceptsIncomingVersion(stored.version, artifact.version);
+}
+
 export function blocklistAgeMs(record: StoredBlocklist, now: number): number {
   return Math.max(0, now - record.fetchedAt);
 }
 
-export function blocklistRequestUrl(baseUrl: string, since: number | null): string {
+export function sinceForFormat(stored: StoredBlocklist | null, format: number): number | null {
+  return stored !== null && stored.format === format ? stored.version : null;
+}
+
+export function blocklistRequestUrl(
+  baseUrl: string,
+  since: number | null,
+  format: number = AFBL_PREFERRED_FORMAT,
+): string {
   const url = new URL(BLOCKLIST_PATH, baseUrl);
-  url.searchParams.set(BLOCKLIST_FORMAT_PARAM, String(AFBL_FORMAT));
+  url.searchParams.set(BLOCKLIST_FORMAT_PARAM, String(format));
   if (since !== null) {
     url.searchParams.set(BLOCKLIST_SINCE_PARAM, String(since));
   }
@@ -70,6 +109,56 @@ export interface SyncDeps {
   readonly now?: () => number;
 }
 
+interface FetchAttempt {
+  readonly kind: "response";
+  readonly response: Response;
+  readonly format: number;
+}
+
+type FetchResult =
+  | FetchAttempt
+  | { readonly kind: "failed"; readonly reason: string };
+
+async function fetchNegotiated(
+  fetchImpl: typeof fetch,
+  baseUrl: string,
+  stored: StoredBlocklist | null,
+): Promise<FetchResult> {
+  let refusedFormats = "";
+
+  for (let index = 0; index < BLOCKLIST_REQUEST_FORMATS.length; index += 1) {
+    const format = BLOCKLIST_REQUEST_FORMATS[index];
+    const last = index === BLOCKLIST_REQUEST_FORMATS.length - 1;
+
+    let response: Response;
+    try {
+      response = await fetchImpl(
+        blocklistRequestUrl(baseUrl, sinceForFormat(stored, format), format),
+        {
+          method: "GET",
+          cache: "no-store",
+          credentials: "omit",
+          redirect: "follow",
+        },
+      );
+    } catch (cause) {
+      return { kind: "failed", reason: `fetch thất bại: ${String(cause)}` };
+    }
+
+    if (response.status === 400 && !last) {
+      refusedFormats = `${refusedFormats}${refusedFormats === "" ? "" : ", "}format ${format}`;
+      continue;
+    }
+
+    return { kind: "response", response, format };
+  }
+
+  return {
+    kind: "failed",
+    reason: `server từ chối mọi format client biết đọc (${refusedFormats})`,
+  };
+}
+
 export async function syncBlocklist(deps: SyncDeps): Promise<BlocklistSyncOutcome> {
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch.bind(globalThis);
   const now = deps.now ?? Date.now;
@@ -83,17 +172,12 @@ export async function syncBlocklist(deps: SyncDeps): Promise<BlocklistSyncOutcom
 
   const keptVersion = stored === null ? null : stored.version;
 
-  let response: Response;
-  try {
-    response = await fetchImpl(blocklistRequestUrl(deps.baseUrl, keptVersion), {
-      method: "GET",
-      cache: "no-store",
-      credentials: "omit",
-      redirect: "follow",
-    });
-  } catch (cause) {
-    return { kind: "unavailable", reason: `fetch thất bại: ${String(cause)}`, keptVersion };
+  const attempt = await fetchNegotiated(fetchImpl, deps.baseUrl, stored);
+  if (attempt.kind === "failed") {
+    return { kind: "unavailable", reason: attempt.reason, keptVersion };
   }
+
+  const response = attempt.response;
 
   if (response.status === 304) {
     if (stored !== null) {
@@ -102,6 +186,7 @@ export async function syncBlocklist(deps: SyncDeps): Promise<BlocklistSyncOutcom
         version: stored.version,
         phish: stored.phish,
         legit: stored.legit,
+        soft: stored.soft,
         etag: response.headers.get(HEADER_ETAG) ?? stored.etag,
         pinnedUrl: response.headers.get(HEADER_PINNED_URL) ?? stored.pinnedUrl,
         fetchedAt: now(),
@@ -161,11 +246,27 @@ export async function syncBlocklist(deps: SyncDeps): Promise<BlocklistSyncOutcom
     };
   }
 
-  if (keptVersion !== null && !acceptsIncomingVersion(keptVersion, artifact.version)) {
+  const headerSoftCount = headerNumber(response, HEADER_SOFT_COUNT);
+  if (
+    headerSoftCount !== null &&
+    afblCarriesSoft(artifact.format) &&
+    headerSoftCount !== artifact.soft.length
+  ) {
+    return {
+      kind: "refused",
+      refusal: {
+        code: "truncated_body",
+        message: `Header ${HEADER_SOFT_COUNT} nói ${headerSoftCount} entry mềm nhưng byte thứ 18 nói ${artifact.soft.length}. Hai nguồn không khớp thì giữ bản đang có.`,
+      },
+      keptVersion,
+    };
+  }
+
+  if (stored !== null && !acceptsIncomingArtifact(stored, artifact)) {
     return {
       kind: "rejected_older",
       incomingVersion: artifact.version,
-      keptVersion,
+      keptVersion: stored.version,
     };
   }
 
@@ -174,6 +275,7 @@ export async function syncBlocklist(deps: SyncDeps): Promise<BlocklistSyncOutcom
     version: artifact.version,
     phish: artifact.phish,
     legit: artifact.legit,
+    soft: artifact.soft,
     etag: response.headers.get(HEADER_ETAG),
     pinnedUrl: response.headers.get(HEADER_PINNED_URL),
     fetchedAt: now(),
@@ -181,8 +283,10 @@ export async function syncBlocklist(deps: SyncDeps): Promise<BlocklistSyncOutcom
 
   return {
     kind: "fresh",
+    format: artifact.format,
     version: artifact.version,
     phishCount: artifact.phish.length,
     legitCount: artifact.legit.length,
+    softCount: artifact.soft.length,
   };
 }

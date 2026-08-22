@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { DEFAULT_API_BASE_URL } from "../../src/config.ts";
 import { decodeAfbl } from "../../src/lib/afbl.ts";
-import { blocklistRequestUrl } from "../../src/lib/blocklist-sync.ts";
+import { probeBlocklist } from "../helpers/production.ts";
 import { hostSha256Hex } from "../../src/lib/host.ts";
 import {
   LOOKUP_MAX_PREFIXES_PER_REQUEST,
@@ -54,18 +54,14 @@ async function findCollisions(prefixes: Set<string>, wanted: number): Promise<Co
 
 beforeAll(async () => {
   try {
-    const response = await fetch(blocklistRequestUrl(BASE_URL, null), {
-      method: "GET",
-      cache: "no-store",
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-    const decoded = decodeAfbl(new Uint8Array(await response.arrayBuffer()));
+    const probe = await probeBlocklist(BASE_URL, TIMEOUT_MS);
+    const decoded = decodeAfbl(probe.bytes);
     if (!decoded.ok) {
       unreachable = `artifact production không decode được: ${decoded.refusal.code}`;
       return;
     }
     const prefixes = new Set<string>();
-    for (const entries of [decoded.artifact.phish, decoded.artifact.legit]) {
+    for (const entries of [decoded.artifact.phish, decoded.artifact.legit, decoded.artifact.soft]) {
       for (const entry of entries) {
         prefixes.add(entry.toString(16).padStart(16, "0").slice(0, 5));
       }

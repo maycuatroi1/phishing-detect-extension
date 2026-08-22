@@ -24,9 +24,10 @@ tên miền chưa có kết luận nào và điểm rủi ro tính tại máy v�
 
 ## Tier 0: danh sách tải sẵn, tra trong máy
 
-**Gửi đi:** `GET /v1/blocklist?format=1`, thêm tham số `since=<version>` khi máy đã có sẵn một bản.
-Request này không mang cookie, không mang header xác thực, không mang bất kỳ định danh nào của
-extension.
+**Gửi đi:** `GET /v1/blocklist?format=2`, và nếu máy chủ chưa phục vụ format 2 thì hỏi lại
+`GET /v1/blocklist?format=1`. Tham số `since=<version>` được thêm khi máy đã có sẵn một bản đúng
+format đang hỏi. Request này không mang cookie, không mang header xác thực, không mang bất kỳ định
+danh nào của extension.
 
 **Chạy lúc nào:** khi cài extension, khi Chrome khởi động, và sau đó mỗi 1440 phút, tức là một ngày
 một lần, qua `chrome.alarms`.
@@ -35,6 +36,20 @@ một lần, qua `chrome.alarms`.
 
 Khi bạn mở một trang, extension băm tên miền bằng SHA-256, lấy 64 bit đầu, rồi tìm nhị phân trong
 mảng đã tải sẵn nằm trong máy. Không một byte nào rời khỏi máy trong bước này.
+
+Danh sách có **ba mảng**, và ba mảng đó không đáng tin như nhau:
+
+- **Mảng phish:** một moderator đã xem trang và kết luận. Badge đỏ, chữ `!`.
+- **Mảng hợp lệ:** cũng do người quyết định. Badge xanh, chữ `OK`.
+- **Mảng mềm:** model tự đánh dấu, chưa người nào kiểm chứng. Badge hổ phách, chữ `~`, và tooltip
+  nói thẳng "trang này bị máy đánh dấu, chưa có người kiểm chứng".
+
+Con số bạn nên biết: ngưỡng tự duyệt của mảng mềm đo trên bộ eval của dự án đạt 0.9675, tức khoảng
+**3 trang trên 100 bị đánh dấu oan**. Đó là lý do trang ở mức mềm gỡ được không cần người: đúng một
+lượt "Báo cảnh báo nhầm" của một người dùng rút cờ mềm khỏi trang đó cho mọi máy, ngay lập tức.
+Trang đã được một người xác nhận thì không thế: report chỉ vào hàng chờ moderator.
+
+Cả ba mảng đều tra trong máy bạn. Việc trang bạn mở nằm ở mảng nào không rời khỏi máy.
 
 Hai điều máy chủ vẫn biết từ tier 0: địa chỉ IP của bạn vào lúc tải danh sách, và tham số `since`
 cho biết máy bạn đang giữ bản nào, tức là lần gần nhất bạn đồng bộ. Một ngày một request là rất ít,
@@ -133,9 +148,10 @@ Extension chỉ tự gửi URL đầy đủ lên máy chủ khi **tất cả** n
 1. Công tắc "Tự quét trang lạ" trong popup đang bật. Nó bật sẵn, và tắt là đúng một cú bấm.
 2. Trang là http hoặc https, và tên miền không phải địa chỉ nội bộ, tên máy trong mạng riêng, hay
    đuôi do cơ quan đăng ký cấp có kiểm tra pháp nhân như `.gov.vn`, `.edu.vn`, `.gov`, `.edu`.
-3. Tên miền chưa có kết luận nào: không nằm trong danh sách tier 0 và tier 1 cũng không trả về
-   `phishing` hay `legit`. Một tên miền đã được đánh dấu hợp lệ thì **không bao giờ** bị tự quét, kể
-   cả khi điểm rủi ro của nó rất cao.
+3. Tên miền chưa có kết luận nào: không nằm trong bất kỳ mảng nào của danh sách tier 0, kể cả mảng
+   mềm, và tier 1 cũng không trả về `phishing` hay `legit`. Một tên miền đã được đánh dấu hợp lệ thì
+   **không bao giờ** bị tự quét, kể cả khi điểm rủi ro của nó rất cao. Một tên miền đã mang cờ mềm
+   cũng không bị quét lại, vì cờ đó vốn đã là kết luận của chính model ấy.
 4. Điểm rủi ro của tên miền, tính hoàn toàn trong máy bạn, đạt từ ngưỡng trở lên.
 5. Hôm nay chưa tự quét tên miền đó, và số lượt tự quét trong ngày chưa chạm trần 6 lượt. Trần đó
    thấp hơn hẳn hạn mức 20 lượt mỗi ngày của một install token, để phần còn lại vẫn dành cho những
@@ -159,6 +175,10 @@ tuỳ chọn.
 Khi một lượt tự quét chạy, thứ rời khỏi máy đúng bằng thứ một cú bấm gửi đi: URL đầy đủ của tab, kèm
 install token. Cảnh báo tự động cũng chỉ là badge và chữ trong popup; extension vẫn không chặn và
 không chuyển hướng.
+
+Cảnh báo sinh ra từ một lượt tự quét là **badge hổ phách**, không phải badge đỏ, vì nó cũng chỉ là
+kết luận của model và chưa người nào kiểm chứng. Màu đỏ dành riêng cho mức đã có người xem và kết
+luận.
 
 **Tắt hẳn:** mở popup, bấm "Tắt tự quét trang lạ". Sau đó không lượt tự quét nào chạy nữa, kể cả với
 trang điểm rủi ro cao nhất, và nút bấm tay vẫn dùng được. Trạng thái công tắc nằm trong IndexedDB
@@ -184,6 +204,13 @@ extension này.
 
 Một report là **lời khai của bạn gửi cho moderator**, không bao giờ tự động trở thành nhãn của
 trang. Report gắn với install token của bạn, nên nó không nặc danh trước máy chủ.
+
+Có đúng một việc mà một report tự làm được, và nó chỉ đi theo chiều HẠ cảnh báo: một khai báo
+`false_positive` trên trang đang mang cờ mềm của máy sẽ rút cờ đó ngay, không moderator nào phải
+duyệt, và trang biến khỏi mảng mềm của bản danh sách tiếp theo mà mọi máy tải về. Trên trang đã có
+quyết định của người thì cùng khai báo ấy không rút gì cả, nó vào hàng chờ. Máy chủ nói rõ vế nào đã
+xảy ra trong trường `soft_flag` của câu trả lời 202, và popup hiện lại nguyên văn vế đó. Không có
+chiều ngược lại: không lời khai nào của người dùng NÂNG được mức cảnh báo của một trang.
 
 ## Install token: định danh, và nó nối các lần bấm lại với nhau
 

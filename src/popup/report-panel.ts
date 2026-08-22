@@ -1,7 +1,9 @@
 import type { ReportClaim } from "../lib/claim.ts";
-import { softensWarning, type StoredDispute } from "../lib/dispute-store.ts";
+import type { StoredDispute } from "../lib/dispute-store.ts";
+import type { ReportSoftFlag } from "../lib/report.ts";
 import type { Tier0Verdict } from "../lib/tier0.ts";
 import type { FileReportOutcome } from "../lib/tier3.ts";
+import { resolveWarningLevel, type WarningLevel } from "../lib/warning-level.ts";
 import { formatInstant } from "./scan-panel.ts";
 
 export const PHISHING_LABEL = "Báo trang này lừa đảo";
@@ -16,7 +18,14 @@ export const CLAIM_IS_NOT_A_LABEL =
 export const TURNSTILE_NO_EXTENSION_PAGE =
   "Trang của extension MV3 không nạp được script Turnstile của Cloudflare, nên extension không giải thay bạn được. Chờ hết cửa sổ giới hạn rồi bấm lại.";
 
-export type WarningLevel = "hard" | "soft" | "none";
+export const MACHINE_FLAG_UNVERIFIED =
+  "Cảnh báo này do model dựng tự động và chưa có người nào kiểm chứng. Đo trên bộ eval-v1, ngưỡng tự duyệt ấy đúng 0.9675, tức là cứ 100 trang bị đánh dấu thì khoảng 3 trang bị đánh dấu oan.";
+
+export const ONE_REPORT_CLEARS_MACHINE_FLAG = `Vì thế trang như thế này gỡ được không cần người: đúng một lượt ${FALSE_POSITIVE_LABEL} của bạn rút cờ mềm ngay lập tức, cho mọi máy đang cài extension, không phải chỉ cho máy bạn và không phải chờ moderator nào cả.`;
+
+export const HUMAN_CONFIRMED_NEEDS_MODERATOR = `Trang đã được một người xác nhận thì khác hẳn: ${FALSE_POSITIVE_LABEL} ở đó chỉ vào hàng chờ moderator và chỉ hạ cảnh báo trên máy bạn, không gỡ cho ai khác.`;
+
+export type { WarningLevel };
 
 export type ReportModel =
   | { readonly kind: "unsupported" }
@@ -42,10 +51,7 @@ export interface ReportPanelView {
 }
 
 export function warningLevel(verdict: Tier0Verdict, dispute: StoredDispute | null): WarningLevel {
-  if (verdict !== "phishing") {
-    return "none";
-  }
-  return softensWarning(dispute) ? "soft" : "hard";
+  return resolveWarningLevel({ verdict, dispute, dismissal: null });
 }
 
 function filedAlready(dispute: StoredDispute | null, claim: ReportClaim): boolean {
@@ -64,6 +70,16 @@ function gateNote(gate: string | null): string {
     : `Cổng Turnstile trả lời ${gate}.`;
 }
 
+function softFlagNote(softFlag: ReportSoftFlag | null): string {
+  if (softFlag === "withdrawn") {
+    return "Server nói soft_flag withdrawn: cờ mềm do máy dựng đã bị rút khỏi trang này cho mọi người, ngay lập tức và không cần moderator.";
+  }
+  if (softFlag === "unchanged") {
+    return "Server nói soft_flag unchanged: không có cờ mềm nào bị rút, vì trang này không mang cờ mềm hoặc đã có một người quyết định về nó.";
+  }
+  return "Server chưa trả trường soft_flag, nên chưa biết có cờ mềm nào bị rút hay không.";
+}
+
 function readyView(verdict: Tier0Verdict, dispute: StoredDispute | null): ReportPanelView {
   const level = warningLevel(verdict, dispute);
 
@@ -74,11 +90,19 @@ function readyView(verdict: Tier0Verdict, dispute: StoredDispute | null): Report
     falsePositiveEnabled: !filedAlready(dispute, "false_positive"),
   };
 
-  if (level === "soft" && dispute !== null) {
+  if (level === "disputed" && dispute !== null) {
     return {
       ...shell,
       headline: "Cảnh báo đang ở mức mềm",
-      detail: `Bạn đã báo nhầm lúc ${formatInstant(new Date(dispute.filedAt).toISOString())}, mã report ${dispute.reportId}. Extension đã hạ cảnh báo ngay trên máy bạn. ${CLAIM_IS_NOT_A_LABEL} Trạng thái trang trên server chỉ đổi khi một moderator xem lại.`,
+      detail: `Bạn đã báo nhầm lúc ${formatInstant(new Date(dispute.filedAt).toISOString())}, mã report ${dispute.reportId}. Extension đã hạ cảnh báo ngay trên máy bạn. ${CLAIM_IS_NOT_A_LABEL} Với trang do máy đánh dấu, lượt báo nhầm ấy đã rút cờ mềm cho mọi người; với trang do người xác nhận, trạng thái trên server chỉ đổi khi một moderator xem lại.`,
+    };
+  }
+
+  if (level === "machine") {
+    return {
+      ...shell,
+      headline: "Máy đánh dấu trang này, chưa có người kiểm chứng",
+      detail: `${MACHINE_FLAG_UNVERIFIED} ${ONE_REPORT_CLEARS_MACHINE_FLAG} ${HUMAN_CONFIRMED_NEEDS_MODERATOR} Đúng một cú bấm, không phải điền gì.`,
     };
   }
 
@@ -86,7 +110,7 @@ function readyView(verdict: Tier0Verdict, dispute: StoredDispute | null): Report
     return {
       ...shell,
       headline: "Danh sách tải sẵn đang cảnh báo trang này là lừa đảo",
-      detail: `Nếu bạn tin đây là cảnh báo nhầm thì bấm ${FALSE_POSITIVE_LABEL}. Đúng một cú bấm, không phải điền gì, và cảnh báo hạ xuống mức mềm ngay trên máy bạn.`,
+      detail: `Một người đã xem trang này và kết luận, nên đây không phải cờ mềm của máy. Nếu bạn tin đây là cảnh báo nhầm thì bấm ${FALSE_POSITIVE_LABEL}. Đúng một cú bấm, không phải điền gì, và cảnh báo hạ xuống mức mềm ngay trên máy bạn, nhưng chỉ trên máy bạn: ${HUMAN_CONFIRMED_NEEDS_MODERATOR}`,
     };
   }
 
@@ -120,7 +144,7 @@ function filedView(outcome: FileReportOutcome, dispute: StoredDispute | null): R
     return {
       ...shell,
       headline: outcome.claim === "false_positive" ? "Đã ghi nhận báo nhầm" : "Đã gửi report",
-      detail: `Mã report ${outcome.reportId}. Server xếp report vào hàng chờ moderator. ${softened} ${gateNote(outcome.gate)} ${CLAIM_IS_NOT_A_LABEL}`,
+      detail: `Mã report ${outcome.reportId}. Server xếp report vào hàng chờ moderator. ${softened} ${softFlagNote(outcome.softFlag)} ${gateNote(outcome.gate)} ${CLAIM_IS_NOT_A_LABEL}`,
     };
   }
 

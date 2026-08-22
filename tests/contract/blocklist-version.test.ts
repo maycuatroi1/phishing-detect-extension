@@ -129,6 +129,7 @@ describe("version của artifact là số thứ tự thay đổi nội dung, kh�
       version: 1,
       phish: new BigUint64Array(0),
       legit: new BigUint64Array(0),
+      soft: new BigUint64Array(0),
       etag: null,
       pinnedUrl: null,
       fetchedAt: now - 3_600_000,

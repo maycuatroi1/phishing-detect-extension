@@ -1,6 +1,13 @@
 import "fake-indexeddb/auto";
 import { beforeAll, describe, expect, it } from "vitest";
-import { AFBL_FORMAT, AFBL_HEADER_BYTES, afblByteLength, decodeAfbl } from "../../src/lib/afbl.ts";
+import {
+  AFBL_FORMATS,
+  afblByteLength,
+  afblCarriesSoft,
+  afblContains,
+  afblHeaderBytes,
+  decodeAfbl,
+} from "../../src/lib/afbl.ts";
 import { clearStoredBlocklist, readStoredBlocklist } from "../../src/lib/blocklist-store.ts";
 import {
   HEADER_ETAG,
@@ -8,6 +15,7 @@ import {
   HEADER_LEGIT_COUNT,
   HEADER_PHISH_COUNT,
   HEADER_PINNED_URL,
+  HEADER_SOFT_COUNT,
   HEADER_VERSION,
   blocklistRequestUrl,
   syncBlocklist,
@@ -15,6 +23,7 @@ import {
 import { DEFAULT_API_BASE_URL } from "../../src/config.ts";
 import { invalidateTier0Cache, lookupHost } from "../../src/lib/tier0.ts";
 import { UNSEEN_HOST } from "../helpers/fixture.ts";
+import { probeBlocklist, type ProductionProbe } from "../helpers/production.ts";
 
 const BASE_URL = process.env.PUBLIC_API_BASE_URL ?? DEFAULT_API_BASE_URL;
 
@@ -22,13 +31,7 @@ const OFFLINE_IS_OK = process.env.ALLOW_OFFLINE_CONTRACT === "1";
 
 const TIMEOUT_MS = 20_000;
 
-interface Probe {
-  readonly status: number;
-  readonly bytes: Uint8Array;
-  readonly headers: Headers;
-}
-
-let probe: Probe | null = null;
+let probe: ProductionProbe | null = null;
 let unreachable: string | null = null;
 
 function skipping(): boolean {
@@ -43,16 +46,7 @@ function skipping(): boolean {
 
 beforeAll(async () => {
   try {
-    const response = await fetch(blocklistRequestUrl(BASE_URL, null), {
-      method: "GET",
-      cache: "no-store",
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-    probe = {
-      status: response.status,
-      bytes: new Uint8Array(await response.arrayBuffer()),
-      headers: response.headers,
-    };
+    probe = await probeBlocklist(BASE_URL, TIMEOUT_MS);
   } catch (cause) {
     unreachable = String(cause);
   }
@@ -78,12 +72,42 @@ describe("đường production thật tại " + BASE_URL, () => {
     if (!decoded.ok) return;
 
     const artifact = decoded.artifact;
-    expect(artifact.format).toBe(AFBL_FORMAT);
+    expect(AFBL_FORMATS).toContain(artifact.format);
     expect(String(artifact.format)).toBe(probe.headers.get(HEADER_FORMAT));
     expect(String(artifact.version)).toBe(probe.headers.get(HEADER_VERSION));
     expect(String(artifact.phish.length)).toBe(probe.headers.get(HEADER_PHISH_COUNT));
     expect(String(artifact.legit.length)).toBe(probe.headers.get(HEADER_LEGIT_COUNT));
-    expect(probe.bytes.byteLength).toBe(afblByteLength(artifact.phish.length, artifact.legit.length));
+    expect(probe.bytes.byteLength).toBe(
+      afblByteLength(
+        artifact.phish.length,
+        artifact.legit.length,
+        artifact.soft.length,
+        artifact.format,
+      ),
+    );
+  });
+
+  it("mảng mềm chỉ tồn tại ở format 2, và không entry mềm nào nằm trong mảng phish", () => {
+    if (probe === null) return void skipping();
+    const decoded = decodeAfbl(probe.bytes);
+    if (!decoded.ok) return;
+
+    const artifact = decoded.artifact;
+    const softHeader = probe.headers.get(HEADER_SOFT_COUNT);
+
+    if (afblCarriesSoft(artifact.format)) {
+      expect(softHeader).toBe(String(artifact.soft.length));
+    } else {
+      expect(artifact.soft.length).toBe(0);
+      expect(softHeader).toBeNull();
+    }
+
+    for (const entry of artifact.soft) {
+      expect(
+        afblContains(artifact.phish, entry),
+        "một entry mềm nằm luôn trong mảng phish thì client sẽ sơn badge đỏ cho một kết luận chưa ai xác nhận",
+      ).toBe(false);
+    }
   });
 
   it("ETag và pinned URL khớp format cùng version vừa đọc được từ byte", () => {
@@ -100,9 +124,10 @@ describe("đường production thật tại " + BASE_URL, () => {
     const decoded = decodeAfbl(probe.bytes);
     if (!decoded.ok) return;
 
-    if (probe.bytes.byteLength === AFBL_HEADER_BYTES) {
+    if (probe.bytes.byteLength === afblHeaderBytes(decoded.artifact.format)) {
       expect(decoded.artifact.phish.length).toBe(0);
       expect(decoded.artifact.legit.length).toBe(0);
+      expect(decoded.artifact.soft.length).toBe(0);
     }
 
     await clearStoredBlocklist();
@@ -115,7 +140,7 @@ describe("đường production thật tại " + BASE_URL, () => {
 
     const stored = await readStoredBlocklist();
     expect(stored?.version).toBe(decoded.artifact.version);
-    expect(stored?.format).toBe(AFBL_FORMAT);
+    expect(stored?.format).toBe(decoded.artifact.format);
     expect(stored?.etag).toBe(`"afbl-${decoded.artifact.format}-${decoded.artifact.version}"`);
     expect(stored?.pinnedUrl).toBe(
       `/v1/blocklist/v/${decoded.artifact.version}?format=${decoded.artifact.format}`,
@@ -131,14 +156,14 @@ describe("đường production thật tại " + BASE_URL, () => {
     expect(stored).not.toBeNull();
     if (stored === null) return;
 
-    const response = await fetch(blocklistRequestUrl(BASE_URL, stored.version), {
+    const pinned = blocklistRequestUrl(BASE_URL, stored.version, stored.format);
+    const response = await fetch(pinned, {
       method: "GET",
       cache: "no-store",
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    expect(new URL(blocklistRequestUrl(BASE_URL, stored.version)).searchParams.get("since")).toBe(
-      String(stored.version),
-    );
+    expect(new URL(pinned).searchParams.get("since")).toBe(String(stored.version));
+    expect(new URL(pinned).searchParams.get("format")).toBe(String(stored.format));
     expect(response.status).toBe(304);
     expect((await response.arrayBuffer()).byteLength).toBe(0);
     expect(response.headers.get(HEADER_VERSION)).toBe(String(stored.version));

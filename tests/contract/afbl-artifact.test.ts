@@ -80,9 +80,11 @@ describe("decoder từ chối mọi artifact nó không chắc đọc đúng", (
   });
 
   it("unsupported_format khi uint16 ở byte 4 là format lạ", () => {
-    const bytes = good.slice();
-    new DataView(bytes.buffer).setUint16(AFBL_FORMAT_OFFSET, 2, true);
-    expect(refusalOf(bytes)).toBe("unsupported_format");
+    for (const stranger of [0, 3, 4, 65535]) {
+      const bytes = good.slice();
+      new DataView(bytes.buffer).setUint16(AFBL_FORMAT_OFFSET, stranger, true);
+      expect(refusalOf(bytes), `format ${stranger} phải bị từ chối`).toBe("unsupported_format");
+    }
   });
 
   it("truncated_body khi header khai nhiều entry hơn số byte thật có", () => {

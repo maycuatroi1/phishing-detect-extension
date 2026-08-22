@@ -23,7 +23,7 @@ import {
   writeAutoScanEnabled,
 } from "../../src/lib/auto-scan-store.ts";
 import { RISK_THRESHOLD, isHighRisk, scoreHost } from "../../src/lib/risk.ts";
-import { HARD_WARNING_TEXT } from "../../src/background/tier0.ts";
+import { HARD_WARNING_TEXT, SOFT_WARNING_TEXT } from "../../src/background/tier0.ts";
 import { entriesFor } from "../helpers/fixture.ts";
 import { encodeAfbl } from "../../src/lib/afbl.ts";
 import { manualClock } from "../helpers/clock.ts";
@@ -113,6 +113,7 @@ beforeEach(async () => {
     version: decoded.artifact.version,
     phish: decoded.artifact.phish,
     legit: decoded.artifact.legit,
+    soft: decoded.artifact.soft,
     etag: `"afbl-1-${FIXTURE_VERSION}"`,
     pinnedUrl: `/v1/blocklist/v/${FIXTURE_VERSION}?format=1`,
     fetchedAt: 1_800_000_000_000,
@@ -155,7 +156,11 @@ describe("tự quét chỉ chạy sau khi qua cổng lọc", () => {
 
     expect(tap.requests.filter(isScanPost)).toHaveLength(1);
     expect(countInstallRequests(tap.requests)).toBe(1);
-    expect(setBadgeText.mock.calls.some((call) => call[0].text === HARD_WARNING_TEXT)).toBe(true);
+    expect(setBadgeText.mock.calls.some((call) => call[0].text === SOFT_WARNING_TEXT)).toBe(true);
+    expect(
+      setBadgeText.mock.calls.some((call) => call[0].text === HARD_WARNING_TEXT),
+      "một verdict của model không được sơn badge đỏ, đó là badge của mức đã có người xác nhận",
+    ).toBe(false);
 
     const day = await readAutoScanDay(dayKeyOf(Date.now()));
     expect(day.entries.map((entry) => entry.host)).toEqual([HOST_HIGH_RISK]);

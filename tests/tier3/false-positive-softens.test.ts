@@ -90,6 +90,7 @@ beforeEach(async () => {
     version: decoded.artifact.version,
     phish: decoded.artifact.phish,
     legit: decoded.artifact.legit,
+    soft: decoded.artifact.soft,
     etag: `"afbl-1-${FIXTURE_VERSION}"`,
     pinnedUrl: `/v1/blocklist/v/${FIXTURE_VERSION}?format=1`,
     fetchedAt: NOW,

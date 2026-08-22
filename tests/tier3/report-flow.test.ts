@@ -70,6 +70,7 @@ describe("một cú bấm là một report, và server nhận nó vào hàng ch�
       gate: "not-required",
       claim: "phishing",
       softened: false,
+      softFlag: null,
     });
     expect(countReportRequests(tap.requests)).toBe(1);
     expect(countInstallRequests(tap.requests)).toBe(1);
@@ -145,6 +146,7 @@ describe("báo nhầm ghi một tranh chấp cục bộ, báo lừa đảo thì 
       gate: "not-required",
       claim: "false_positive",
       softened: true,
+      softFlag: null,
     });
 
     const dispute = await readDispute(HOST);

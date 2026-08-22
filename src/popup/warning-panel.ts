@@ -1,6 +1,6 @@
 import type { StoredDismissal } from "../lib/dismissal-store.ts";
+import type { WarningLevel } from "../lib/warning-level.ts";
 import { formatInstant } from "./scan-panel.ts";
-import type { WarningLevel } from "./report-panel.ts";
 
 export const DISMISS_LABEL = "Tắt cảnh báo cho trang này";
 
@@ -16,6 +16,9 @@ export const ONE_CLICK_OFF =
 
 export const STAYS_LOCAL =
   "Việc tắt này chỉ nằm trong máy bạn, không gửi đi đâu và không đổi kết luận của server.";
+
+export const MACHINE_WARNING =
+  "Cảnh báo màu hổ phách nghĩa là model đánh dấu trang này chứ chưa người nào kiểm chứng, và nó sai khoảng 3 lần trên 100. Màu đỏ mới là mức đã có người xem và kết luận.";
 
 export type WarningModel =
   | { readonly kind: "unsupported" }
@@ -35,10 +38,14 @@ export interface WarningPanelView {
 }
 
 function readyView(level: WarningLevel, dismissal: StoredDismissal | null): WarningPanelView {
-  if (dismissal !== null) {
+  if (dismissal !== null || level === "dismissed") {
+    const when =
+      dismissal === null
+        ? ""
+        : `Bạn tắt lúc ${formatInstant(new Date(dismissal.dismissedAt).toISOString())}. `;
     return {
       headline: "Cảnh báo đang tắt cho trang này",
-      detail: `Bạn tắt lúc ${formatInstant(new Date(dismissal.dismissedAt).toISOString())}. Badge im, không có cảnh báo nào hiện lên nữa. ${STAYS_LOCAL} Bấm ${RESTORE_LABEL} là nó quay lại ngay.`,
+      detail: `${when}Badge im, không có cảnh báo nào hiện lên nữa. ${STAYS_LOCAL} Bấm ${RESTORE_LABEL} là nó quay lại ngay.`,
       buttonLabel: RESTORE_LABEL,
       buttonEnabled: true,
       warningVisible: false,
@@ -47,7 +54,7 @@ function readyView(level: WarningLevel, dismissal: StoredDismissal | null): Warn
 
   if (level === "hard") {
     return {
-      headline: "Đang cảnh báo trang này",
+      headline: "Đang cảnh báo trang này, và một người đã xác nhận",
       detail: `${NEVER_BLOCKS} ${ONE_CLICK_OFF}`,
       buttonLabel: DISMISS_LABEL,
       buttonEnabled: true,
@@ -55,7 +62,17 @@ function readyView(level: WarningLevel, dismissal: StoredDismissal | null): Warn
     };
   }
 
-  if (level === "soft") {
+  if (level === "machine") {
+    return {
+      headline: "Máy đánh dấu trang này, chưa có người kiểm chứng",
+      detail: `${MACHINE_WARNING} ${NEVER_BLOCKS} ${ONE_CLICK_OFF}`,
+      buttonLabel: DISMISS_LABEL,
+      buttonEnabled: true,
+      warningVisible: true,
+    };
+  }
+
+  if (level === "disputed") {
     return {
       headline: "Cảnh báo đang ở mức mềm, vẫn tắt hẳn được",
       detail: `Báo nhầm đã hạ cảnh báo xuống mức mềm. Nếu vẫn thấy phiền thì tắt hẳn. ${ONE_CLICK_OFF} ${STAYS_LOCAL}`,

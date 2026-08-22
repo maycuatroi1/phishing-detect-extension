@@ -10,6 +10,7 @@ import {
   UNSEEN_HOST,
   blocklistResponse,
   fixtureArtifact,
+  unsupportedFormatResponse,
 } from "../helpers/fixture.ts";
 
 const BASE_URL = "https://anti-fraud.omelet.tech";
@@ -74,7 +75,7 @@ describe("artifact hỏng thì từ chối và giữ bản cũ", () => {
   it("đường 3: không fail closed, host lạ vẫn ra unknown chứ không bị cảnh báo", async () => {
     await seedGoodArtifact();
 
-    const wrongFormat = encodeAfbl({ version: 99, format: 2, phish: [], legit: [] });
+    const wrongFormat = encodeAfbl({ version: 99, format: 3, phish: [], legit: [] });
     const outcome = await syncBlocklist({
       baseUrl: BASE_URL,
       fetchImpl: corruptFetch(wrongFormat, 99),
@@ -140,18 +141,53 @@ describe("artifact hỏng thì từ chối và giữ bản cũ", () => {
     expect((await readStoredBlocklist())?.version).toBe(GOOD_VERSION);
   });
 
-  it("gửi since đúng bằng version đang giữ, tên tham số là since", async () => {
+  it("hỏi format 2 trước, và nếu server chưa biết format 2 thì hỏi lại format 1 kèm since", async () => {
     await seedGoodArtifact();
+    expect((await readStoredBlocklist())?.format).toBe(1);
+
     const spy = vi.fn(async (input: string | URL | Request) => {
       expect(typeof input).toBe("string");
+      const asked = new URL(String(input));
+      if (asked.searchParams.get("format") === "2") {
+        return unsupportedFormatResponse(2);
+      }
       return blocklistResponse(await fixtureArtifact(GOOD_VERSION + 1), GOOD_VERSION + 1);
     });
-    await syncBlocklist({ baseUrl: BASE_URL, fetchImpl: spy as unknown as typeof fetch });
 
-    const requested = new URL(String(spy.mock.calls[0]?.[0]));
-    expect(requested.pathname).toBe("/v1/blocklist");
-    expect(requested.searchParams.get("format")).toBe("1");
-    expect(requested.searchParams.get("since")).toBe(String(GOOD_VERSION));
-    expect(requested.searchParams.has("have")).toBe(false);
+    const outcome = await syncBlocklist({
+      baseUrl: BASE_URL,
+      fetchImpl: spy as unknown as typeof fetch,
+    });
+    expect(outcome.kind).toBe("fresh");
+
+    expect(spy.mock.calls).toHaveLength(2);
+
+    const preferred = new URL(String(spy.mock.calls[0]?.[0]));
+    expect(preferred.pathname).toBe("/v1/blocklist");
+    expect(preferred.searchParams.get("format")).toBe("2");
+    expect(preferred.searchParams.has("since")).toBe(false);
+
+    const fallback = new URL(String(spy.mock.calls[1]?.[0]));
+    expect(fallback.pathname).toBe("/v1/blocklist");
+    expect(fallback.searchParams.get("format")).toBe("1");
+    expect(fallback.searchParams.get("since")).toBe(String(GOOD_VERSION));
+    expect(fallback.searchParams.has("have")).toBe(false);
+
+    expect((await readStoredBlocklist())?.version).toBe(GOOD_VERSION + 1);
+  });
+
+  it("400 ở format cuối cùng là không lấy được artifact, và bản cũ vẫn nguyên", async () => {
+    await seedGoodArtifact();
+
+    const outcome = await syncBlocklist({
+      baseUrl: BASE_URL,
+      fetchImpl: (async () => unsupportedFormatResponse(1)) as unknown as typeof fetch,
+    });
+
+    expect(outcome.kind).toBe("unavailable");
+    expect((await readStoredBlocklist())?.version).toBe(GOOD_VERSION);
+
+    invalidateTier0Cache();
+    expect((await lookupHost(PHISH_HOST)).verdict).toBe("phishing");
   });
 });

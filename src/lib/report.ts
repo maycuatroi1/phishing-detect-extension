@@ -20,6 +20,10 @@ export const REPORT_HTML_FIELD = "html";
 
 export const REPORT_TURNSTILE_FIELD = "turnstile_token";
 
+export const REPORT_SOFT_FLAG_FIELD = "soft_flag";
+
+export const REPORT_SOFT_FLAGS = ["withdrawn", "unchanged"] as const;
+
 export const REPORT_REQUIRED_FIELDS: readonly string[] = [REPORT_URL_FIELD, REPORT_CLAIM_FIELD];
 
 export const REPORT_REQUEST_FIELDS: readonly string[] = [
@@ -40,6 +44,8 @@ export const TURNSTILE_GATES = ["not-required", "verified", "not-configured"] as
 
 export type TurnstileGate = (typeof TURNSTILE_GATES)[number];
 
+export type ReportSoftFlag = (typeof REPORT_SOFT_FLAGS)[number];
+
 export interface ReportInput {
   readonly url: string;
   readonly claim: ReportClaim;
@@ -50,6 +56,7 @@ export interface ReportInput {
 export interface ReportQueued {
   readonly reportId: string;
   readonly gate: TurnstileGate | null;
+  readonly softFlag: ReportSoftFlag | null;
 }
 
 export type SubmitReportOutcome =
@@ -104,6 +111,10 @@ export function gateOfResponse(response: Response): TurnstileGate | null {
   return isTurnstileGate(raw) ? raw : null;
 }
 
+export function isReportSoftFlag(value: unknown): value is ReportSoftFlag {
+  return typeof value === "string" && (REPORT_SOFT_FLAGS as readonly string[]).includes(value);
+}
+
 export function parseReportQueued(body: unknown, gate: TurnstileGate | null): ReportQueued | null {
   if (typeof body !== "object" || body === null) {
     return null;
@@ -115,7 +126,12 @@ export function parseReportQueued(body: unknown, gate: TurnstileGate | null): Re
   if (record.status !== "queued") {
     return null;
   }
-  return { reportId: record.report_id, gate };
+  const softFlag = record[REPORT_SOFT_FLAG_FIELD];
+  return {
+    reportId: record.report_id,
+    gate,
+    softFlag: isReportSoftFlag(softFlag) ? softFlag : null,
+  };
 }
 
 function withRetryAfter(error: ApiError, response: Response): ApiError {

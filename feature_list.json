@@ -13,6 +13,7 @@
     "Mâu thuẫn cần nói thẳng thay vì im lặng chọn một bên: tính tới 2026-08-23 nhiều hành vi trong file này đã có bằng chứng end-to-end thật. Extension đã được nạp vào Chrome thật qua CDP Extensions.loadUnpacked và tier 0 cùng tier 1 chạy được với production https://anti-fraud.omelet.tech; hợp đồng tier 1 và tier 2 đã được đo thẳng trên production ngày 22/08/2026; pnpm package đã sinh zip xác định. Theo nghĩa đó, một số mục dưới đây xứng đáng true.",
     "Chúng vẫn để false vì phiên tạo ra file này chỉ được phép TẠO đúng feature_list.json trong repo extension và không được chạy bất kỳ lệnh nào ở đây, nên nó không tự tay quan sát được hành vi nào. Một 'passes': true do nghe kể lại chính là thứ luật thứ ba ở trên cấm.",
     "Việc cần làm tiếp, không phải viết lại file này: chạy lại từng bộ steps trong một Chrome thật, rồi lật passes kèm proof cho đúng những mục đã quan sát được. Repo llm-phishing-detection-evaluation đang để cả 16 mục false theo cùng lý do và cũng cần một lượt đối chiếu như vậy.",
+    "Ngày 23/08/2026 lớp cảnh báo MỀM được nối vào từ phishing-detect-web@e001054. Năm mục mới được THÊM vào cuối nhóm hành vi, không mục nào bị xoá hay thu hẹp. Cả năm để passes false vì production đang trả HTTP 500 cho /v1/blocklist tại thời điểm làm, nên không quan sát được vòng end-to-end nào trong Chrome thật. Mục tier2-only-on-click và auto-scan-gated giữ nguyên chữ: cổng lọc không đổi tính chất, chỉ thêm verdict soft vào nhóm 'đã có kết luận' và đổi màu badge của kết quả tự quét từ đỏ sang hổ phách.",
     "Ngày 23/08/2026 invariant 'tier 2 không bao giờ tự chạy' bị đảo có chủ ý: Bình vào https://mamibet88.cc/vi-vn/ và không thấy cảnh báo nào, dù tier 2 kết luận is_scam true trong 5 giây khi bấm tay. Mục tier2-only-on-click vì thế được viết rộng ra chứ không co lại: nó vẫn đòi vế cũ (duyệt trang dưới ngưỡng không tiêu lượt nào, bấm nút thì quét) và đòi thêm sáu vế mới của cổng lọc. Không mục nào bị xoá và không mục nào bị thu hẹp."
   ],
   "features": [
@@ -198,6 +199,72 @@
         "Gửi báo nhầm từ popup",
         "Xác nhận badge chuyển sang mức mềm trên máy đó",
         "Xác nhận lần tra sau vẫn nhận verdict gốc từ server, tức khai báo người dùng không phải là nhãn"
+      ],
+      "passes": false
+    },
+    {
+      "id": "soft-warning-amber-badge",
+      "category": "functional",
+      "description": "Host nằm trong mảng mềm của AFBL format 2 cho badge hổ phách với chữ riêng và tooltip nói thẳng là máy đánh dấu chưa có người kiểm chứng, khác hẳn badge đỏ của mức đã có người xác nhận",
+      "steps": [
+        "Dựng một artifact AFBL format 2 có đúng một host trong mảng phish và đúng một host khác trong mảng mềm, rồi cho extension đồng bộ nó",
+        "Điều hướng tới host trong mảng mềm và xác nhận badge là chữ mềm màu hổ phách chứ không phải chữ ! màu đỏ",
+        "Rê chuột lên badge và xác nhận tooltip nói trang bị máy đánh dấu và chưa có người kiểm chứng",
+        "Điều hướng tới host trong mảng phish và xác nhận badge đổi sang chữ ! màu đỏ với tooltip nói đã có người xác nhận",
+        "Mở popup ở cả hai trang và xác nhận hai lời dặn khác nhau, không phải cùng một chữ"
+      ],
+      "passes": false
+    },
+    {
+      "id": "soft-entry-never-hard",
+      "category": "safety",
+      "description": "Một entry mềm không bao giờ được đối xử như entry cứng: nó không lọt vào mảng phish khi decode, không cho verdict phishing khi tra, và không mượn badge đỏ",
+      "steps": [
+        "Cho extension đồng bộ một artifact format 2 có một host chỉ nằm trong mảng mềm",
+        "Mở DevTools của service worker, đọc bản ghi current trong IndexedDB anti-fraud-blocklist",
+        "Xác nhận ba mảng phish, legit và soft nằm rời nhau và mảng phish không chứa entry của host mềm",
+        "Điều hướng tới host mềm và xác nhận verdict là soft chứ không phải phishing",
+        "Xác nhận badge không bao giờ chuyển sang chữ ! màu đỏ cho host đó"
+      ],
+      "passes": false
+    },
+    {
+      "id": "blocklist-format-fallback",
+      "category": "resilience",
+      "description": "Đồng bộ xin format 2 trước, và khi máy chủ chưa deploy format 2 thì rơi về format 1 với mảng mềm rỗng, coi đó là một lần đồng bộ thành công chứ không phải lỗi",
+      "steps": [
+        "Trỏ extension vào một máy chủ chỉ phục vụ format 1",
+        "Kích alarm đồng bộ rồi xem tab Network của service worker",
+        "Xác nhận request đầu tiên hỏi format=2 và bị trả 400 unsupported_format",
+        "Xác nhận request thứ hai hỏi format=1 kèm since đúng bằng version đang giữ",
+        "Xác nhận artifact được ghi vào IndexedDB với format 1 và mảng soft rỗng, và console không báo lỗi",
+        "Xác nhận lần đồng bộ kế tiếp vẫn trả 304 chứ không tải lại toàn bộ artifact"
+      ],
+      "passes": false
+    },
+    {
+      "id": "soft-warning-one-report-clears",
+      "category": "functional",
+      "description": "Popup nói cho người dùng biết rằng trên trang bị máy đánh dấu, một lượt báo nhầm của họ gỡ cảnh báo cho mọi người, khác với trang đã được người xác nhận",
+      "steps": [
+        "Mở popup trên một trang đang ở mức mềm",
+        "Xác nhận phần report nói rõ một lượt báo nhầm rút cờ mềm cho mọi máy đang cài extension và không cần moderator",
+        "Xác nhận cùng phần đó nói rõ trang đã được người xác nhận thì report chỉ vào hàng chờ và chỉ hạ cảnh báo trên máy bạn",
+        "Bấm Báo cảnh báo nhầm một lần và xác nhận popup hiện lại nguyên văn giá trị soft_flag mà máy chủ trả về",
+        "Xác nhận badge của trang đó hạ xuống mức mềm ngay trên máy"
+      ],
+      "passes": false
+    },
+    {
+      "id": "warning-priority-order",
+      "category": "functional",
+      "description": "Bốn mức chồng lên nhau theo đúng một thứ tự: tắt hẳn thắng kêu oan tại máy, kêu oan thắng cả mức mềm lẫn mức cứng của server",
+      "steps": [
+        "Chọn một host đang ở mức mềm và một host đang ở mức cứng",
+        "Trên từng host, bấm Báo cảnh báo nhầm rồi xác nhận badge chuyển sang badge kêu oan",
+        "Bấm tiếp Tắt cảnh báo cho trang này và xác nhận badge im hẳn, tức tắt hẳn thắng kêu oan",
+        "Bấm Bật lại cảnh báo và xác nhận badge quay lại badge kêu oan chứ không quay thẳng về mức của server",
+        "Xoá bản ghi tranh chấp trong IndexedDB anti-fraud-disputes và xác nhận badge quay về đúng mức của server cho từng host"
       ],
       "passes": false
     },

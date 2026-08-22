@@ -15,6 +15,14 @@ info:
     against.
 
 
+    Tier 0 ships warnings at two levels and they are not interchangeable. A moderator confirmed
+    host is in the phish array of every format, warn hard, and only a moderator ever takes it out.
+    A host the detection model auto-approved is in the soft array of format 2 only, warn in amber
+    and say it is unverified, and one user report takes it down with no human in the loop. The two
+    are separate arrays rather than one array with a flag so that a client which never learned
+    about the soft level cannot show it as if it were the hard one.
+
+
     This document is the contract, not a description of it. A client codes against this file; the
     server is checked against this file. Every change must be additive until the oldest supported
     extension version drops below the support floor, because an extension on the Chrome Web Store
@@ -119,12 +127,24 @@ paths:
         handed must keep the artifact it already has rather than fail open.
 
 
+        Format 2 adds one uint32 soft count to the header after the legit count, taking the header
+        from 18 to 22 bytes, and one strictly ascending soft array after legit. Everything before
+        the soft count is byte for byte what format 1 carries, and format 1 keeps being served
+        unchanged to any client that asks for it or asks for nothing. A soft entry is a host the
+        detection model auto-approved with no moderator behind it: warn in amber and say the
+        warning is unverified. A single user report withdraws a soft entry with no human in the
+        loop, so it may vanish between two fetches, while a phish entry needs a moderator both to
+        arrive and to leave. Soft hosts never appear in the phish array of any format.
+
+
         The version names the bytes, not the moment they were built. It is derived from the
         artifact body, so a write to the corpus that does not change a single entry leaves the
         version, the ETag and the pinned URL exactly where they were and a cached copy stays
         valid. The version never goes backwards and advances by one each time the bytes change.
-        Pin the exact bytes with the URL in the x-blocklist-pinned-url header, which is immutable
-        and cacheable for a year.
+        Each format counts its own versions from its own bytes, so a soft entry appearing does not
+        move the format 1 version and does not invalidate a format 1 cache. Pin the exact bytes
+        with the URL in the x-blocklist-pinned-url header, which carries the format alongside the
+        version and is immutable and cacheable for a year.
       security: []
       parameters:
         - $ref: "#/components/parameters/BlocklistFormat"
@@ -152,6 +172,8 @@ paths:
               $ref: "#/components/headers/BlocklistPhishCount"
             X-Blocklist-Legit-Count:
               $ref: "#/components/headers/BlocklistLegitCount"
+            X-Blocklist-Soft-Count:
+              $ref: "#/components/headers/BlocklistSoftCount"
             X-Blocklist-Pinned-Url:
               $ref: "#/components/headers/BlocklistPinnedUrl"
           content:
@@ -186,7 +208,9 @@ paths:
         Same bytes as GET /v1/blocklist when version is the current version, served under an
         immutable year long cache header. Past versions are not retained: the artifact is derived
         from the corpus at request time, so a version that is no longer current cannot be rebuilt
-        and the server answers 404 rather than shipping different bytes under a pinned URL.
+        and the server answers 404 rather than shipping different bytes under a pinned URL. The
+        format is part of the identity of a pinned artifact: version 7 of format 1 and version 7 of
+        format 2 are different bytes, so send the same format the pinned URL was built with.
       security: []
       parameters:
         - $ref: "#/components/parameters/BlocklistVersionPath"
@@ -214,6 +238,8 @@ paths:
               $ref: "#/components/headers/BlocklistPhishCount"
             X-Blocklist-Legit-Count:
               $ref: "#/components/headers/BlocklistLegitCount"
+            X-Blocklist-Soft-Count:
+              $ref: "#/components/headers/BlocklistSoftCount"
             X-Blocklist-Pinned-Url:
               $ref: "#/components/headers/BlocklistPinnedUrl"
           content:
@@ -280,6 +306,12 @@ paths:
         site.status on its own. The server captures its own snapshot of the reported URL; any html
         the client sends is stored separately as an untrusted claim by the reporter and is never
         used as the evidence of record.
+
+
+        One thing a report does immediately, and only in the direction that removes a warning: a
+        false_positive claim against a site whose warning came from the detection model rather than
+        from a moderator withdraws that soft warning on the spot, and the 202 says so in soft_flag.
+        Against a moderator decision the same claim withdraws nothing and waits in the queue.
 
 
         After REPORT_TURNSTILE_THRESHOLD reports inside the rate window the token must also carry a
@@ -539,13 +571,26 @@ components:
       in: query
       required: false
       description: >-
-        The artifact format the client can parse. Omitting it means the current format. Asking for
-        a format the server does not serve is a 400 and no artifact, because a client that cannot
-        name a layout it understands must keep the artifact it already has.
+        The artifact format the client can parse. Omitting it means 1, the oldest format still
+        served, so a client that never learned about a newer layout keeps receiving bytes it
+        already parses. Asking for a format the server does not serve is a 400 and no artifact,
+        because a client that cannot name a layout it understands must keep the artifact it
+        already has.
+
+
+        Format 1 is an 18 byte header and two arrays, phish then legit. Format 2 appends a uint32
+        soft count to the header, making it 22 bytes, and a third array after legit. The soft array
+        holds hosts a model auto-approved into the blocklist without a moderator; they are never
+        folded into the phish array of either format, so a format 1 client is never shown the red
+        badge for a verdict no person confirmed.
+
+
+        Each format counts its own versions from its own bytes. A version read from format 1 does
+        not name an artifact of format 2, which is why the pinned URL and the ETag both carry the
+        format.
       schema:
         type: integer
-        minimum: 0
-        maximum: 4294967295
+        enum: [1, 2]
         default: 1
 
     BlocklistSince:
@@ -625,6 +670,15 @@ components:
         pattern: "^[0-9]+$"
     BlocklistLegitCount:
       description: How many legit entries the artifact carries.
+      schema:
+        type: string
+        pattern: "^[0-9]+$"
+    BlocklistSoftCount:
+      description: >-
+        How many soft entries the artifact carries. Present on format 2 and above and absent on
+        format 1, which has no soft array. A soft entry is a host the detection model auto-approved
+        into the blocklist with no moderator behind it: warn in amber, say the warning is
+        unverified, and expect it to disappear the moment somebody disputes it.
       schema:
         type: string
         pattern: "^[0-9]+$"
@@ -1205,7 +1259,7 @@ components:
     ReportQueued:
       type: object
       additionalProperties: false
-      required: [report_id, status]
+      required: [report_id, status, soft_flag]
       properties:
         report_id:
           type: string
@@ -1214,8 +1268,19 @@ components:
           type: string
           const: queued
           description: >-
-            The report is queued for a moderator. It has changed nothing about the site yet, and it
+            The report is queued for a moderator. It has changed nothing a moderator owns, and it
             may never change anything.
+        soft_flag:
+          type: string
+          enum: [withdrawn, unchanged]
+          description: >-
+            The one thing a report does on its own. withdrawn means this false_positive report just
+            took the machine raised soft flag off the site, immediately and with no moderator
+            asked, so the host leaves the soft array of the next format 2 artifact and the client
+            should stop showing the amber warning now. unchanged means nothing was withdrawn:
+            either the claim was phishing, or the site carries no soft flag, or a moderator has
+            already decided the site, and a moderator decision is never undone automatically. A
+            report can only ever lower a warning here; nothing a user submits raises one.
 
     VerdictEnvelope:
       title: VerdictEnvelope

@@ -64,7 +64,7 @@ describe("đường báo nhầm luôn nằm sẵn ngay cạnh cảnh báo", () =
       dispute: FALSE_POSITIVE_DISPUTE,
     });
 
-    expect(warningLevel("phishing", FALSE_POSITIVE_DISPUTE)).toBe("soft");
+    expect(warningLevel("phishing", FALSE_POSITIVE_DISPUTE)).toBe("disputed");
     expect(view.headline).toContain("mức mềm");
     expect(view.detail).toContain(MEASURED_FALSE_POSITIVE_REPORT_ID);
     expect(view.falsePositiveEnabled).toBe(false);
@@ -105,6 +105,7 @@ describe("view nói đúng chuyện gì vừa xảy ra sau khi gửi", () => {
         gate: "not-required",
         claim: "false_positive",
         softened: true,
+        softFlag: "withdrawn",
       },
       dispute: FALSE_POSITIVE_DISPUTE,
     });

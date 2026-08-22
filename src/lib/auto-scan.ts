@@ -27,7 +27,7 @@ export const AUTO_SCAN_SKIP_REASONS = [
 
 export type AutoScanSkipReason = (typeof AUTO_SCAN_SKIP_REASONS)[number];
 
-export type KnownVerdict = "phishing" | "legit" | "unknown";
+export type KnownVerdict = "phishing" | "soft" | "legit" | "unknown";
 
 export interface AutoScanContext {
   readonly url: string;
@@ -81,7 +81,11 @@ export function decideAutoScan(context: AutoScanContext): AutoScanDecision {
   if (risk.exempt) {
     return { kind: "skip", reason: "host_exempt", risk };
   }
-  if (context.verdict === "legit" || context.verdict === "phishing") {
+  if (
+    context.verdict === "legit" ||
+    context.verdict === "phishing" ||
+    context.verdict === "soft"
+  ) {
     return { kind: "skip", reason: "verdict_known", risk };
   }
   if (!isHighRisk(risk)) {

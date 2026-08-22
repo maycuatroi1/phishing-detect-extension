@@ -2,7 +2,13 @@ import type { ApiErrorCode } from "./api-error.ts";
 import { SOFTENING_CLAIM, type ReportClaim } from "./claim.ts";
 import { writeDispute, type StoredDispute } from "./dispute-store.ts";
 import { hostOfUrl } from "./host.ts";
-import { isReportableUrl, submitReport, type ReportInput, type TurnstileGate } from "./report.ts";
+import {
+  isReportableUrl,
+  submitReport,
+  type ReportInput,
+  type ReportSoftFlag,
+  type TurnstileGate,
+} from "./report.ts";
 import { TOKEN_REFUSAL_CODES, resolveInstallToken } from "./tier2.ts";
 import type { StoredInstallToken } from "./token-store.ts";
 
@@ -23,6 +29,7 @@ export type FileReportOutcome =
       readonly gate: TurnstileGate | null;
       readonly claim: ReportClaim;
       readonly softened: boolean;
+      readonly softFlag: ReportSoftFlag | null;
     }
   | { readonly kind: "turnstile_required"; readonly message: string }
   | { readonly kind: "turnstile_failed"; readonly message: string }
@@ -140,5 +147,6 @@ export async function fileReport(
     gate: outcome.queued.gate,
     claim: input.claim,
     softened,
+    softFlag: outcome.queued.softFlag,
   };
 }

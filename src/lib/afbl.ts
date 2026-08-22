@@ -4,7 +4,17 @@ export const AFBL_MAGIC_BYTES: readonly number[] = [0x41, 0x46, 0x42, 0x4c];
 
 export const AFBL_FORMAT = 1;
 
+export const AFBL_SOFT_FORMAT = 2;
+
+export const AFBL_FORMATS: readonly number[] = [AFBL_FORMAT, AFBL_SOFT_FORMAT];
+
+export const AFBL_PREFERRED_FORMAT = AFBL_SOFT_FORMAT;
+
+export const AFBL_FALLBACK_FORMAT = AFBL_FORMAT;
+
 export const AFBL_HEADER_BYTES = 18;
+
+export const AFBL_SOFT_HEADER_BYTES = 22;
 
 export const AFBL_ENTRY_BYTES = 8;
 
@@ -16,6 +26,8 @@ export const AFBL_PHISH_COUNT_OFFSET = 10;
 
 export const AFBL_LEGIT_COUNT_OFFSET = 14;
 
+export const AFBL_SOFT_COUNT_OFFSET = 18;
+
 export const AFBL_MAX_UINT32 = 0xffffffff;
 
 export const AFBL_HASH_HEX_LENGTH = 16;
@@ -25,6 +37,7 @@ export interface AfblArtifact {
   readonly version: number;
   readonly phish: BigUint64Array;
   readonly legit: BigUint64Array;
+  readonly soft: BigUint64Array;
 }
 
 export type AfblRefusalCode =
@@ -44,8 +57,25 @@ export type AfblDecodeResult =
   | { readonly ok: true; readonly artifact: AfblArtifact }
   | { readonly ok: false; readonly refusal: AfblRefusal };
 
-export function afblByteLength(phishCount: number, legitCount: number): number {
-  return AFBL_HEADER_BYTES + (phishCount + legitCount) * AFBL_ENTRY_BYTES;
+export function isAfblFormat(format: number): boolean {
+  return AFBL_FORMATS.includes(format);
+}
+
+export function afblCarriesSoft(format: number): boolean {
+  return format >= AFBL_SOFT_FORMAT;
+}
+
+export function afblHeaderBytes(format: number): number {
+  return afblCarriesSoft(format) ? AFBL_SOFT_HEADER_BYTES : AFBL_HEADER_BYTES;
+}
+
+export function afblByteLength(
+  phishCount: number,
+  legitCount: number,
+  softCount = 0,
+  format: number = AFBL_FORMAT,
+): number {
+  return afblHeaderBytes(format) + (phishCount + legitCount + softCount) * AFBL_ENTRY_BYTES;
 }
 
 function refuse(code: AfblRefusalCode, message: string): AfblDecodeResult {
@@ -93,22 +123,31 @@ export function decodeAfbl(bytes: Uint8Array): AfblDecodeResult {
   }
 
   const format = view.getUint16(AFBL_FORMAT_OFFSET, true);
-  if (format !== AFBL_FORMAT) {
+  if (!isAfblFormat(format)) {
     return refuse(
       "unsupported_format",
-      `Format ${format} không phải format ${AFBL_FORMAT} mà decoder này đọc được. Giữ bản đang có thay vì đoán layout.`,
+      `Format ${format} không nằm trong bộ format ${AFBL_FORMATS.join(" và ")} mà decoder này đọc được. Giữ bản đang có thay vì đoán layout.`,
+    );
+  }
+
+  const headerBytes = afblHeaderBytes(format);
+  if (bytes.byteLength < headerBytes) {
+    return refuse(
+      "too_short",
+      `Artifact AFBL format ${format} tối thiểu là ${headerBytes} byte header, nhận được ${bytes.byteLength}. Giữ bản đang có.`,
     );
   }
 
   const version = view.getUint32(AFBL_VERSION_OFFSET, true);
   const phishCount = view.getUint32(AFBL_PHISH_COUNT_OFFSET, true);
   const legitCount = view.getUint32(AFBL_LEGIT_COUNT_OFFSET, true);
+  const softCount = afblCarriesSoft(format) ? view.getUint32(AFBL_SOFT_COUNT_OFFSET, true) : 0;
 
-  const expected = afblByteLength(phishCount, legitCount);
+  const expected = afblByteLength(phishCount, legitCount, softCount, format);
   if (bytes.byteLength < expected) {
     return refuse(
       "truncated_body",
-      `Header khai ${phishCount} entry phish và ${legitCount} entry legit, cần ${expected} byte, nhưng artifact chỉ có ${bytes.byteLength} byte. Giữ bản đang có.`,
+      `Header khai ${phishCount} entry phish, ${legitCount} entry legit và ${softCount} entry mềm, cần ${expected} byte, nhưng artifact chỉ có ${bytes.byteLength} byte. Giữ bản đang có.`,
     );
   }
   if (bytes.byteLength > expected) {
@@ -118,7 +157,7 @@ export function decodeAfbl(bytes: Uint8Array): AfblDecodeResult {
     );
   }
 
-  const phish = readSortedEntries(view, AFBL_HEADER_BYTES, phishCount);
+  const phish = readSortedEntries(view, headerBytes, phishCount);
   if (!phish.ascending) {
     return refuse(
       "unsorted_entries",
@@ -126,7 +165,7 @@ export function decodeAfbl(bytes: Uint8Array): AfblDecodeResult {
     );
   }
 
-  const legitStart = AFBL_HEADER_BYTES + phishCount * AFBL_ENTRY_BYTES;
+  const legitStart = headerBytes + phishCount * AFBL_ENTRY_BYTES;
   const legit = readSortedEntries(view, legitStart, legitCount);
   if (!legit.ascending) {
     return refuse(
@@ -135,9 +174,24 @@ export function decodeAfbl(bytes: Uint8Array): AfblDecodeResult {
     );
   }
 
+  const softStart = legitStart + legitCount * AFBL_ENTRY_BYTES;
+  const soft = readSortedEntries(view, softStart, softCount);
+  if (!soft.ascending) {
+    return refuse(
+      "unsorted_entries",
+      "Mảng mềm không tăng ngặt, tìm nhị phân trên đó sẽ bỏ sót host. Giữ bản đang có.",
+    );
+  }
+
   return {
     ok: true,
-    artifact: { format, version, phish: phish.entries, legit: legit.entries },
+    artifact: {
+      format,
+      version,
+      phish: phish.entries,
+      legit: legit.entries,
+      soft: soft.entries,
+    },
   };
 }
 
@@ -180,13 +234,25 @@ export function encodeAfbl(input: {
   readonly format?: number;
   readonly phish: readonly bigint[];
   readonly legit: readonly bigint[];
+  readonly soft?: readonly bigint[];
 }): Uint8Array {
   const format = input.format ?? AFBL_FORMAT;
+  const soft = input.soft ?? [];
+
+  if (soft.length > 0 && !afblCarriesSoft(format)) {
+    throw new Error(
+      `Format ${format} không có mảng mềm, mà lời gọi đưa vào ${soft.length} entry mềm. Entry mềm chỉ đi trong format ${AFBL_SOFT_FORMAT}: gộp chúng vào mảng phish của format ${AFBL_FORMAT} là bắt một client cũ sơn badge đỏ cho một kết luận chưa người nào xác nhận.`,
+    );
+  }
+
   assertUint32(input.version, "version của artifact");
   assertUint32(input.phish.length, "phish_n");
   assertUint32(input.legit.length, "legit_n");
+  assertUint32(soft.length, "soft_n");
 
-  const bytes = new Uint8Array(afblByteLength(input.phish.length, input.legit.length));
+  const bytes = new Uint8Array(
+    afblByteLength(input.phish.length, input.legit.length, soft.length, format),
+  );
   const view = new DataView(bytes.buffer);
 
   bytes.set(AFBL_MAGIC_BYTES, 0);
@@ -194,13 +260,20 @@ export function encodeAfbl(input: {
   view.setUint32(AFBL_VERSION_OFFSET, input.version, true);
   view.setUint32(AFBL_PHISH_COUNT_OFFSET, input.phish.length, true);
   view.setUint32(AFBL_LEGIT_COUNT_OFFSET, input.legit.length, true);
+  if (afblCarriesSoft(format)) {
+    view.setUint32(AFBL_SOFT_COUNT_OFFSET, soft.length, true);
+  }
 
-  let offset = AFBL_HEADER_BYTES;
+  let offset = afblHeaderBytes(format);
   for (const entry of input.phish) {
     view.setBigUint64(offset, entry, true);
     offset += AFBL_ENTRY_BYTES;
   }
   for (const entry of input.legit) {
+    view.setBigUint64(offset, entry, true);
+    offset += AFBL_ENTRY_BYTES;
+  }
+  for (const entry of soft) {
     view.setBigUint64(offset, entry, true);
     offset += AFBL_ENTRY_BYTES;
   }

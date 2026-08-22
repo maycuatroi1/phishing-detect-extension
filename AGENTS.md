@@ -115,8 +115,27 @@ tin cả dự án nữa. Xem `principles/invariants.md#no-blocking` ở harness 
 
 Vế người dùng của cùng invariant ấy: cảnh báo nào cũng tắt được bằng đúng một cú bấm. Popup có nút
 `dismiss-warning`, bấm một lần là badge im hẳn cho host đó, bấm lần nữa là bật lại. Bản ghi tắt nằm
-trong IndexedDB `anti-fraud-dismissals`, không gửi đi đâu và không đổi verdict của server. Thứ tự
-ưu tiên khi sơn badge là tắt hẳn thắng mức mềm, mức mềm thắng cảnh báo cứng.
+trong IndexedDB `anti-fraud-dismissals`, không gửi đi đâu và không đổi verdict của server.
+
+### Bốn mức cảnh báo và đúng một thứ tự ưu tiên
+
+Từ 23/08/2026 có bốn thứ chồng lên nhau, và `src/lib/warning-level.ts` là chỗ duy nhất quyết định
+thứ tự. `resolveWarningLevel` trả về đúng một trong năm giá trị:
+
+1. `dismissed` - người dùng đã tắt hẳn cảnh báo cho host này. Thắng tất cả.
+2. `disputed` - người dùng đã gửi report `false_positive` cho host này. Thắng cả mức cứng lẫn mức
+   mềm của server.
+3. `hard` - host nằm trong mảng phish, tức một moderator đã xem và kết luận. Badge đỏ, chữ `!`.
+4. `machine` - host nằm trong mảng mềm, tức model tự duyệt và chưa người nào kiểm chứng. Badge hổ
+   phách `#ef6c00`, chữ `~`.
+5. `none` - không có cảnh báo nào.
+
+Bốn mức đó không được gộp. `machine` và `hard` khác nhau ở cả ba trường của `BadgeLook`, và
+`tests/soft-warning.test.ts` khoá điều đó bằng một bảng 13 dòng chạy qua cả `resolveWarningLevel`
+lẫn đường sơn badge `userAdjustedLook`, để hai đường không trôi ra hai thứ tự khác nhau.
+
+Đừng thêm mức thứ sáu trùng nghĩa. `disputed` đã là "người dùng kêu oan", `machine` đã là "máy nghi
+mà chưa ai xác nhận"; một mức mới muốn tồn tại phải khác cả hai.
 
 ## Quyền trong manifest
 
@@ -188,16 +207,45 @@ tiện.
 
 1. `chrome.alarms` đánh thức service worker mỗi 1440 phút, cộng một lần lúc `onInstalled` và một lần
    lúc `onStartup`.
-2. `syncBlocklist` gọi `GET /v1/blocklist?format=1&since=<version đang giữ>`. Tên tham số là
-   **`since`**, không phải `have`; `have` bị server bỏ qua và trả về nguyên artifact.
-3. 304 nghĩa là byte không đổi: giữ nguyên entry, chỉ làm mới `etag`, `pinnedUrl` và `fetchedAt`.
-4. 200 thì decode 18 byte header, so `x-blocklist-format` và `x-blocklist-version` với byte 4 và
-   byte 6. Lệch là từ chối.
-5. Ghi vào IndexedDB `anti-fraud-blocklist`, object store `artifact`, đúng một bản ghi khoá
-   `current`, entry là hai `BigUint64Array` đã sắp xếp.
-6. `chrome.tabs.onUpdated` và `onActivated` lấy URL, `hostOfUrl` rút host, `hostEntryOf` băm
+2. `syncBlocklist` gọi `GET /v1/blocklist?format=2&since=<version đang giữ>` trước. Tên tham số là
+   **`since`**, không phải `have`; `have` bị server bỏ qua và trả về nguyên artifact. `since` chỉ
+   được gửi khi format đang giữ ĐÚNG BẰNG format đang hỏi, vì mỗi format đếm version riêng.
+3. Server chưa biết format 2 thì nó trả 400 `unsupported_format`, và client hỏi lại
+   `?format=1&since=<version>`. Rơi về format 1 là đường bình thường chứ không phải lỗi: mảng mềm
+   rỗng và outcome vẫn là `fresh`. 400 ở format cuối cùng mới là `unavailable`, bản cũ giữ nguyên.
+4. 304 nghĩa là byte không đổi: giữ nguyên entry, chỉ làm mới `etag`, `pinnedUrl` và `fetchedAt`.
+5. 200 thì decode header 18 byte (format 1) hoặc 22 byte (format 2), so `x-blocklist-format`,
+   `x-blocklist-version` và `x-blocklist-soft-count` với byte 4, byte 6 và byte 18. Lệch là từ chối.
+6. Ghi vào IndexedDB `anti-fraud-blocklist`, object store `artifact`, đúng một bản ghi khoá
+   `current`, entry là **ba** `BigUint64Array` đã sắp xếp và giữ rời nhau.
+7. `chrome.tabs.onUpdated` và `onActivated` lấy URL, `hostOfUrl` rút host, `hostEntryOf` băm
    SHA-256 rồi lấy 16 ký tự hex đầu thành uint64, `afblContains` tìm nhị phân, `paintBadge` sơn badge
-   theo tab.
+   theo tab. Thứ tự tra là phish, rồi legit, rồi soft: hai kết luận của người đi trước kết luận của
+   máy.
+
+### Mảng mềm của AFBL format 2, và một entry mềm không bao giờ thành entry cứng
+
+Từ commit `e001054` của `phishing-detect-web`, artifact có thêm một lớp cảnh báo MỀM. Header format 2
+là header format 1 cộng một `uint32 soft_n` ở byte 18, tổng 22 byte, rồi một mảng thứ ba sau mảng
+legit. `?format=1` và request thiếu tham số `format` vẫn nhận đúng byte cũ.
+
+Một entry mềm là host mà model tự duyệt, không moderator nào đứng sau. Ngưỡng tự duyệt là "ít nhất
+một phiếu scam và không phiếu nào phản đối", đo trên eval-v1 đạt 0.9675, tức khoảng 3 trang trên 100
+bị đánh dấu oan. Chính con số đó là lý do đúng MỘT report `false_positive` gỡ được cờ mềm cho mọi
+người, không cần moderator; trên mức cứng thì report chỉ vào hàng đợi và không bao giờ tự gỡ.
+
+Luật tuyệt đối trong repo này: **một entry mềm không bao giờ được đối xử như một entry cứng.** Ba
+chỗ cưỡng chế:
+
+- `decodeAfbl` trả ba mảng rời nhau và không bao giờ nối `soft` vào `phish`.
+- `encodeAfbl` NÉM LỖI nếu ai đưa entry mềm vào format 1, thay vì âm thầm gộp chúng vào `phish`. Đó
+  là bản sao của cùng cái khoá bên repo web.
+- `lookupHost` trả verdict riêng `soft`, và `badgeLookFor("soft")` khác `badgeLookFor("phishing")` ở
+  cả ba trường.
+
+`tests/soft-warning.test.ts` giữ cả ba. Sáu phép đột biến đã thử và cả sáu làm test đỏ: gộp `soft`
+vào `phish` khi decode, trả `phishing` cho entry mềm, cho badge mềm mượn chữ và màu của badge cứng,
+đảo thứ tự tắt-hẳn với kêu-oan, bỏ `soft` khỏi cổng tự quét, và bỏ cú ném lỗi của `encodeAfbl`.
 
 ### Artifact hỏng thì giữ bản cũ
 
@@ -356,6 +404,20 @@ không thêm vào được mà không làm test đỏ.
 `lib/auto-scan.ts` cũng không bị gọi vòng qua cổng được: hàm duy nhất nó xuất ra để chạy một lượt là
 `runGatedAutoScan`, và bên trong nó `decideAutoScan` chạy trước `runManualScan`, không có nhánh nào
 đi vòng.
+
+Từ 23/08/2026, verdict `soft` đứng cùng phía với `legit` và `phishing` trong `decideAutoScan`: đã có
+kết luận thì không tự quét lại, lý do bỏ qua vẫn là `verdict_known` chứ không thêm lý do mới. Ba
+điều làm nên quyết định đó, và không điều nào đụng vào tính chất của cổng lọc (ngưỡng 4, trần 6 một
+ngày, `legit` được miễn):
+
+- Cờ mềm đã là kết luận của chính model ấy. Tự quét lại là hỏi lại đúng một oracle về đúng một trang
+  và tiêu một trong sáu lượt để không biết thêm gì.
+- Cổng lọc tồn tại để biến im lặng thành cảnh báo. Host mềm đã có badge hổ phách, không còn im lặng
+  nào để lấp.
+- Nếu vẫn quét, một `is_scam` true sẽ sơn `AUTO_SCAN_WARNING_LOOK` đè lên badge mềm. Trước 23/08 look
+  đó là **đỏ**, tức là một verdict thuần máy mượn badge của mức đã có người xác nhận. Bước này sửa
+  luôn: `AUTO_SCAN_WARNING_LOOK` giờ là badge hổ phách, cùng màu và cùng chữ với mức mềm, vì hai thứ
+  đó có cùng một trạng thái nhận thức. Cổng lọc không đổi, chỉ có màu của kết quả là thành thật hơn.
 
 Sáu file (bốn file tier 2 cộng `lib/auto-scan.ts`, `lib/auto-scan-store.ts` và `lib/risk.ts`) không
 được nhắc `chrome.tabs`, `chrome.alarms`, `chrome.webNavigation`, `chrome.runtime`, `addListener`
@@ -560,6 +622,10 @@ thật trong `phishing-detect-web`. Từ tier 0 trở đi, bản vendor là th�
 `vendor/VENDORED.json` là sổ ghi digest. `pnpm --filter extension check:vendor` rehash và fail nếu
 lệch; nó là bước đầu tiên của cả `build` lẫn `test:contract`, nên không có đường build xanh mà seam
 đã đổi.
+
+Bản đang pin là `phishing-detect-web@e001054`, bản thêm AFBL format 2 và trường `soft_flag` vào
+`ReportQueued`. `verdict.schema.json` không đổi một byte giữa `7d22fe4` và `e001054`, nên digest của
+nó giữ nguyên; chỉ `public.yaml` đổi, từ 51886 lên 56229 byte.
 
 Thư mục tên `vendor/` là có chủ ý: `.gitattributes` có dòng `vendor/** -text`, nên git không được
 normalise hai file này sang CRLF trên Windows. Repo web đã mất nửa ngày vì Nixpacks nuốt CRLF làm

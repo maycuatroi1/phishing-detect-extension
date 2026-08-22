@@ -2,7 +2,7 @@ import { afblContains } from "./afbl.ts";
 import { readStoredBlocklist, type StoredBlocklist } from "./blocklist-store.ts";
 import { hostEntryOf } from "./host.ts";
 
-export type Tier0Verdict = "phishing" | "legit" | "unknown" | "no_artifact";
+export type Tier0Verdict = "phishing" | "soft" | "legit" | "unknown" | "no_artifact";
 
 export interface Tier0Result {
   readonly host: string;
@@ -40,6 +40,9 @@ export async function lookupHost(host: string): Promise<Tier0Result> {
   }
   if (afblContains(artifact.legit, entry)) {
     return { host, verdict: "legit", artifactVersion: artifact.version };
+  }
+  if (afblContains(artifact.soft, entry)) {
+    return { host, verdict: "soft", artifactVersion: artifact.version };
   }
   return { host, verdict: "unknown", artifactVersion: artifact.version };
 }

@@ -12,6 +12,7 @@ export interface StoredBlocklist {
   readonly version: number;
   readonly phish: BigUint64Array;
   readonly legit: BigUint64Array;
+  readonly soft: BigUint64Array;
   readonly etag: string | null;
   readonly pinnedUrl: string | null;
   readonly fetchedAt: number;
@@ -57,11 +58,17 @@ function runTransaction<T>(
   );
 }
 
+export function withSoftArray(record: StoredBlocklist): StoredBlocklist {
+  return record.soft instanceof BigUint64Array
+    ? record
+    : { ...record, soft: new BigUint64Array(0) };
+}
+
 export async function readStoredBlocklist(): Promise<StoredBlocklist | null> {
   const record = await runTransaction<StoredBlocklist | undefined>("readonly", (store) =>
     store.get(BLOCKLIST_RECORD_KEY),
   );
-  return record ?? null;
+  return record === undefined ? null : withSoftArray(record);
 }
 
 export async function writeStoredBlocklist(record: Omit<StoredBlocklist, "key">): Promise<void> {

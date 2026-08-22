@@ -9,6 +9,8 @@ import {
   REPORT_PATH,
   REPORT_REQUEST_FIELDS,
   REPORT_REQUIRED_FIELDS,
+  REPORT_SOFT_FLAGS,
+  REPORT_SOFT_FLAG_FIELD,
   REPORT_TURNSTILE_FIELD,
   REPORT_URL_MAX_LENGTH,
   TURNSTILE_GATES,
@@ -98,17 +100,49 @@ describe("client tier 3 nói đúng thứ tiếng mà openapi vendor mô tả", 
     );
   });
 
-  it("202 mang đúng hai trường mà client đọc, và client parse được", () => {
+  it("202 mang đúng bộ trường mà client đọc, và client parse được", () => {
     const schema = document.components.schemas.ReportQueued;
     expect(schema.additionalProperties).toBe(false);
-    expect(schema.required).toEqual(["report_id", "status"]);
+    expect(schema.required).toEqual(["report_id", "status", REPORT_SOFT_FLAG_FIELD]);
     expect(schema.properties.status.const).toBe("queued");
+    expect(schema.properties[REPORT_SOFT_FLAG_FIELD].enum).toEqual([...REPORT_SOFT_FLAGS]);
 
     const parsed = parseReportQueued({ report_id: MEASURED_REPORT_ID, status: "queued" }, "not-required");
     expect(parsed?.reportId).toBe(MEASURED_REPORT_ID);
     expect(parsed?.gate).toBe("not-required");
     expect(parseReportQueued({ report_id: MEASURED_REPORT_ID, status: "running" }, null)).toBeNull();
     expect(parseReportQueued({ status: "queued" }, null)).toBeNull();
+  });
+
+  it("soft_flag là trường duy nhất một report tự đổi được, và client đọc được cả khi server chưa gửi", () => {
+    const description: string = document.components.schemas.ReportQueued.properties[
+      REPORT_SOFT_FLAG_FIELD
+    ].description;
+    expect(description).toContain("machine raised soft flag");
+    expect(description).toContain("a moderator decision is never undone automatically");
+    expect(description).toContain("A report can only ever lower a warning here");
+
+    const withdrawn = parseReportQueued(
+      { report_id: MEASURED_REPORT_ID, status: "queued", soft_flag: "withdrawn" },
+      null,
+    );
+    expect(withdrawn?.softFlag).toBe("withdrawn");
+
+    const unchanged = parseReportQueued(
+      { report_id: MEASURED_REPORT_ID, status: "queued", soft_flag: "unchanged" },
+      null,
+    );
+    expect(unchanged?.softFlag).toBe("unchanged");
+
+    const missing = parseReportQueued({ report_id: MEASURED_REPORT_ID, status: "queued" }, null);
+    expect(missing).not.toBeNull();
+    expect(missing?.softFlag).toBeNull();
+
+    const nonsense = parseReportQueued(
+      { report_id: MEASURED_REPORT_ID, status: "queued", soft_flag: "raised" },
+      null,
+    );
+    expect(nonsense?.softFlag).toBeNull();
   });
 
   it("ba giá trị của header x-turnstile trùng ba hằng số trong client", () => {

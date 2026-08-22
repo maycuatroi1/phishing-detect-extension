@@ -14,13 +14,9 @@ import { isScannableUrl } from "../lib/scan.ts";
 import { lookupHost, type Tier0Verdict } from "../lib/tier0.ts";
 import { runManualScan } from "../lib/tier2.ts";
 import { fileReport } from "../lib/tier3.ts";
+import { resolveWarningLevel, type WarningLevel } from "../lib/warning-level.ts";
 import { panelView, type PanelModel, type PanelView } from "./scan-panel.ts";
-import {
-  reportPanelView,
-  warningLevel,
-  type ReportModel,
-  type ReportPanelView,
-} from "./report-panel.ts";
+import { reportPanelView, type ReportModel, type ReportPanelView } from "./report-panel.ts";
 import { warningPanelView, type WarningModel, type WarningPanelView } from "./warning-panel.ts";
 import {
   autoScanPanelView,
@@ -267,9 +263,13 @@ async function startWarning(url: string | null): Promise<void> {
     return;
   }
 
-  const level = warningLevel(await currentVerdict(host), await currentDispute(host));
+  const verdict = await currentVerdict(host);
+  const dispute = await currentDispute(host);
   let dismissal = await currentDismissal(host);
-  applyWarning({ kind: "ready", level, dismissal });
+
+  const levelNow = (): WarningLevel => resolveWarningLevel({ verdict, dispute, dismissal });
+
+  applyWarning({ kind: "ready", level: levelNow(), dismissal });
 
   const button = actionButton("dismiss-warning");
   if (button === null) {
@@ -293,10 +293,10 @@ async function startWarning(url: string | null): Promise<void> {
     void work
       .then(async () => {
         dismissal = await currentDismissal(host);
-        applyWarning({ kind: "ready", level, dismissal });
+        applyWarning({ kind: "ready", level: levelNow(), dismissal });
       })
       .catch(() => {
-        applyWarning({ kind: "ready", level, dismissal });
+        applyWarning({ kind: "ready", level: levelNow(), dismissal });
       })
       .finally(() => {
         saving = false;
@@ -374,7 +374,10 @@ readStoredBlocklist()
       return;
     }
     setSlot("artifact-version", `${record.version} (format ${record.format})`);
-    setSlot("artifact-entries", `${record.phish.length} phish, ${record.legit.length} legit`);
+    setSlot(
+      "artifact-entries",
+      `${record.phish.length} phish, ${record.legit.length} legit, ${record.soft.length} mềm`,
+    );
     setSlot("artifact-age", formatAge(blocklistAgeMs(record, Date.now())));
   })
   .catch(() => {

@@ -81,6 +81,7 @@ beforeEach(async () => {
     version: decoded.artifact.version,
     phish: decoded.artifact.phish,
     legit: decoded.artifact.legit,
+    soft: decoded.artifact.soft,
     etag: `"afbl-1-${FIXTURE_VERSION}"`,
     pinnedUrl: `/v1/blocklist/v/${FIXTURE_VERSION}?format=1`,
     fetchedAt: NOW,
@@ -221,7 +222,7 @@ describe("panel cảnh báo nói đúng trạng thái và luôn chỉ một cú 
   });
 
   it("cảnh báo mềm vẫn tắt hẳn được", () => {
-    const view = warningPanelView({ kind: "ready", level: "soft", dismissal: null });
+    const view = warningPanelView({ kind: "ready", level: "disputed", dismissal: null });
 
     expect(view.buttonEnabled).toBe(true);
     expect(view.buttonLabel).toBe(DISMISS_LABEL);
