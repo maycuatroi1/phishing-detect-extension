@@ -47,7 +47,10 @@ PUBLIC_API_BASE_URL=https://anti-fraud.omelet.tech
 `pnpm --filter extension build` chạy `vite build` rồi `tsx scripts/check-no-secrets.ts`. Build chỉ
 thoát 0 khi cả hai vế thoát 0. Không có script build nào bỏ qua post-check, và đừng thêm.
 
-Post-check quét mọi file văn bản trong `dist/`, bỏ qua file nhị phân, và áp bốn luật:
+Post-check quét mọi file văn bản trong `dist/`, bỏ qua file nhị phân, và áp bốn luật. File `.zip`
+trong `dist/` **không** bị coi là nhị phân: nó được mở ra, giải từng entry rồi quét từng entry như
+một chunk riêng tên dạng `extension.zip!background.js`. Archive không mở được là lỗi exit 2, vì một
+vùng không quét được thì không được coi là vùng sạch. Bốn luật:
 
 - `env-var-name`: tên của một biến môi trường không có tiền tố `PUBLIC_` xuất hiện nguyên văn trong
   output. Nguồn tên là `process.env` lúc build cộng mọi file `.env*` ở gốc repo.
@@ -476,6 +479,7 @@ pnpm --filter extension typecheck         # tsc --noEmit
 pnpm --filter extension test              # vitest, toàn bộ
 pnpm --filter extension test:contract     # check băm vendor cộng tests/contract
 pnpm --filter extension test:kanon        # chứng minh k-anonymity của tier 1
+pnpm --filter extension package           # dist/ thành dist/extension.zip, rồi quét lại bên trong zip
 ```
 
 Repo đứng một mình nhưng vẫn có `pnpm-workspace.yaml` với `packages: [.]` và `name: "extension"`
@@ -512,9 +516,97 @@ trong IndexedDB `anti-fraud-install`.
 Bấm đủ 20 lần trên cùng một install token thì lần 21 là 429 và popup ghi mốc mở lại lấy từ
 `error.reset_at`; sau đó Network đứng im, không có request nào nữa cho tới khi bấm lại.
 
+## Đóng gói
+
+`pnpm --filter extension package` chạy sau `build` và sinh `dist/extension.zip`. Nó không phải một
+lệnh `zip -r dist`, và ba khác biệt là lý do nó tồn tại.
+
+**Một, chỉ thứ Chrome cần chạy mới vào gói.** `scripts/pack-rules.ts` giữ danh sách đuôi được phép,
+danh sách đuôi cấm và danh sách thư mục cấm. `node_modules/`, `src/`, `tests/`, `scripts/`,
+`vendor/`, sourcemap, tài liệu `.md` và mọi file ẩn đều bị loại, và mỗi lần loại đều in ra lý do chứ
+không im lặng. Trước khi gói, script còn kiểm ba thứ: manifest không trỏ vào file không có trong
+gói, mọi `src`/`href` trong HTML của gói giải ra một entry có thật, và mỗi icon manifest khai là PNG
+thật đúng kích thước đã khai.
+
+**Hai, zip xác định được.** Gói hai lần trên cùng một `dist/` ra file giống hệt nhau tới từng byte.
+Nguồn bất định duy nhất trong định dạng zip là dấu thời gian, nên nó bị ghim: mọi entry mang DOS
+date `0x0021` và DOS time `0x0000`, tức là 1980-01-01 00:00:00, mốc chuẩn của reproducible build.
+Cùng với đó là entry sắp theo tên, cờ general purpose bằng 0, trường extra rỗng, external attributes
+bằng 0. Entry lưu ở chế độ **store** chứ không nén: nén là chỗ duy nhất còn lại mà kết quả phụ thuộc
+phiên bản zlib đi kèm Node, và cả extension chỉ khoảng 50 KB nên không đáng đánh đổi tính xác định
+lấy vài chục KB. Chrome Web Store nén lại theo cách của nó khi đóng CRX, nên store mode không làm
+người dùng tải nặng hơn.
+
+**Ba, secret bên trong zip bị quét thật.** Đây từng là một lỗ. `scripts/check-no-secrets.ts` bỏ qua
+mọi file trông như nhị phân, và một file zip luôn trông như nhị phân, nên trước bước này một secret
+nằm trong `dist/extension.zip` sẽ đi qua post-check mà không ai thấy. Bây giờ post-check mở zip ra,
+giải từng entry rồi quét từng entry như một chunk riêng, tên chunk in ra dạng
+`extension.zip!background.js`. Archive không mở được trong `dist/` là **lỗi** chứ không phải cảnh
+báo, vì một vùng không quét được thì không được coi là vùng sạch. `scripts/package.ts` cũng tự quét
+lại nội dung zip nó vừa ghi, nên chạy `package` một mình cũng không sinh ra được file zip có pattern
+secret.
+
+Diễn tập lỗ này: nhét `aft1_` cộng 43 ký tự vào một file trong `dist/` rồi chạy `package`, hoặc dựng
+một zip chỉ chứa entry có token đó rồi chạy `check:no-secrets`. Cả hai đều phải đỏ.
+
+## Chính sách riêng tư là một tạo tác phát hành
+
+`PRIVACY.md` không phải văn bản trang trí. Nó nêu từng tier gửi gì đi đâu, và nó nói thẳng ba thứ mà
+một chính sách viết dối sẽ tránh:
+
+- Prefix của tier 1 giấu **trang nào**, không giấu **việc vừa mở một trang nào đó**. Nhịp duyệt web,
+  giờ online, cường độ, số trang lạ mở cùng lúc đều còn nguyên trong log của server.
+- Prefix ổn định theo host, nên một người đã có sẵn nghi ngờ tính prefix của trang họ nghi rồi dò
+  trong log là ra một xác nhận rất mạnh. K-anonymity mạnh trước người không biết đoán gì, yếu hơn
+  nhiều trước người đã có danh sách nghi ngờ.
+- Install token là một định danh. Nó nối mọi lần quét sâu và mọi report của cùng một bản cài lại với
+  nhau, kèm URL đầy đủ từng lần.
+
+Luật: **đổi thứ gì rời khỏi máy thì sửa `PRIVACY.md` trong cùng commit đó.** Thêm một trường vào
+`/v1/report`, mở ô ghi chú trong popup, gắn token vào một tier khác, đổi jitter hay TTL cache đều là
+thay đổi phải phản ánh vào tài liệu.
+
+## Tài sản cho listing Chrome Web Store
+
+`public/icons/` có icon 16, 48, 128 và cả ba là PNG thật, đúng kích thước, được test khoá lại trong
+`tests/package/rules.test.ts`.
+
+`store/screenshots/` có hai ảnh chụp thật của popup, sáng và tối, chụp bằng Chrome thật chạy với
+backend production, không dựng, không ghép. Chúng còn thiếu hai thứ trước khi nộp được:
+
+- Chrome Web Store đòi ảnh 1280x800 hoặc 640x400. Hai ảnh này là ảnh gốc theo kích thước thật của
+  popup, cần một lượt bố cục để ra đúng khung.
+- Chưa có ảnh nào chụp trạng thái **đang cảnh báo**, vì muốn có nó phải ghé một host thật nằm trong
+  corpus. Artifact chỉ chứa mã băm cắt ngắn nên không suy ngược ra host được, và bucket lookup của
+  các host phổ biến đều rỗng. Ai có một mẫu thật thì chụp được ngay, còn suy luận thì không.
+
+Policy còn thiếu một URL công khai. Chrome Web Store bắt buộc điền URL chính sách riêng tư lúc
+submit, và repo này chưa dựng nơi host nào.
+
+## Nạp thử gói zip bằng Chrome thật
+
+Nút "Load unpacked" mở hộp thoại chọn thư mục của hệ điều hành, không tự động hoá được. Nhưng phần
+"gói này có nạp được không, manifest có lỗi không" thì đo được, và nên đo bằng Chrome thật:
+
+```sh
+# giải zip ra một thư mục tạm, rồi
+chrome --headless=new --user-data-dir=<thư mục tạm> --remote-debugging-port=9333 about:blank
+```
+
+Rồi qua CDP gọi `Extensions.loadUnpacked` với đường dẫn thư mục vừa giải. Nó trả về extension id nếu
+manifest hợp lệ và ném lỗi nếu không. Từ Chrome 137, cờ dòng lệnh `--load-extension` bị tắt mặc định
+bởi feature `DisableLoadExtensionCommandLineSwitch`, nên đường CDP đáng tin hơn đường cờ dòng lệnh.
+
+Sau khi nạp được, bật `Network` trên target service worker rồi mở một tab tới một host lạ: phải thấy
+đúng `GET /v1/blocklist` một lần và `GET /v1/lookup?p=xxxxx` với đúng năm ký tự hex, không
+`Authorization`, không `Cookie`, không `Referer`. Tier 2 và tier 3 thì **đừng** tự động bấm: chúng
+tiêu quota thật và đẩy report thật vào hàng đợi moderation của production.
+
 ## Bố cục
 
 ```
+PRIVACY.md                    chính sách riêng tư, sửa cùng commit với mọi thay đổi luồng dữ liệu
+store/screenshots/            ảnh chụp popup thật, sáng và tối, nguyên liệu cho listing
 public/manifest.json          manifest MV3, copy nguyên trạng vào dist/
 public/icons/                 icon 16, 48, 128
 vendor/VENDORED.json          sổ digest của hai file seam
@@ -547,9 +639,13 @@ scripts/check-no-secrets.ts   post-check sau build
 scripts/secret-patterns.ts    chín pattern secret, có test riêng
 scripts/lint-no-blocking.ts   runner của invariant no-blocking, in lý do rồi exit 1
 scripts/no-blocking-rules.ts  bốn luật no-blocking, hàm thuần, có test fixture riêng
+scripts/package.ts            dist/ thành dist/extension.zip, kiểm manifest, icon, HTML, secret
+scripts/pack-rules.ts         luật gói, giải đường dẫn manifest và HTML, đọc kích thước PNG
+scripts/zip.ts                writer zip ghim ngày và reader zip có kiểm CRC, dùng chung hai chỗ
 tests/contract/               hợp đồng seam, layout AFBL, version, production thật
 tests/kanon/                  k-anonymity tier 1: không credential, so ở client, gộp lô, token không rò
 tests/tier2/                  không tự quét, hết quota là dừng, vòng đời một lần bấm
+tests/package/                zip xác định được, ghim ngày, secret trong zip vẫn bị bắt, luật gói
 tests/helpers/imports.ts      đi bộ đồ thị import của src/, dùng để khoá ranh giới tier
 tests/                        vitest phần còn lại
 ```

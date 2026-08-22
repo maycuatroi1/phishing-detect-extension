@@ -14,6 +14,7 @@
     "check:no-secrets": "tsx scripts/check-no-secrets.ts",
     "check:vendor": "tsx scripts/check-vendor-hash.ts",
     "lint:no-blocking": "tsx scripts/lint-no-blocking.ts",
+    "package": "tsx scripts/package.ts && tsx scripts/check-no-secrets.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:contract": "tsx scripts/check-vendor-hash.ts && vitest run tests/contract",

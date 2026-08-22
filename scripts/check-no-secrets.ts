@@ -2,10 +2,12 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { parse as parseDotenv } from "dotenv";
 import { scanSecretPatterns } from "./secret-patterns.ts";
+import { readZip } from "./zip.ts";
 
 const REPO_ROOT = process.cwd();
 const DIST_DIR = resolve(REPO_ROOT, "dist");
 const PUBLIC_PREFIX = "PUBLIC_";
+const ZIP_EXTENSION = ".zip";
 
 const ENV_NAME_SHAPE = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/;
 const ENV_REFERENCE =
@@ -129,6 +131,20 @@ function chunkName(file: string): string {
   return relative(DIST_DIR, file).split("\\").join("/");
 }
 
+interface ScanChunk {
+  readonly name: string;
+  readonly buffer: Buffer;
+}
+
+function chunksOf(file: string): ScanChunk[] {
+  const buffer = readFileSync(file);
+  const name = chunkName(file);
+  if (!name.toLowerCase().endsWith(ZIP_EXTENSION)) {
+    return [{ name, buffer }];
+  }
+  return readZip(buffer).map((entry) => ({ name: `${name}!${entry.name}`, buffer: entry.data }));
+}
+
 function occurrencesOf(haystack: string, needle: string): number[] {
   const positions: number[] = [];
   let from = 0;
@@ -160,14 +176,31 @@ function main(): void {
   let scannedFiles = 0;
   let skippedBinary = 0;
   let scannedBytes = 0;
+  let expandedArchives = 0;
 
+  const chunks: ScanChunk[] = [];
   for (const file of files) {
-    const buffer = readFileSync(file);
+    if (chunkName(file).toLowerCase().endsWith(ZIP_EXTENSION)) {
+      expandedArchives += 1;
+    }
+    try {
+      chunks.push(...chunksOf(file));
+    } catch (cause) {
+      console.error(
+        `check-no-secrets: không mở được ${chunkName(file)} để quét bên trong: ${String(cause)}`,
+      );
+      console.error(
+        "Một archive không đọc được trong dist/ là một vùng không quét được, nên đây là lỗi chứ không phải cảnh báo.",
+      );
+      process.exit(2);
+    }
+  }
+
+  for (const { name: chunk, buffer } of chunks) {
     if (looksBinary(buffer)) {
       skippedBinary += 1;
       continue;
     }
-    const chunk = chunkName(file);
     const text = buffer.toString("utf8");
     scannedFiles += 1;
     scannedBytes += buffer.length;
@@ -222,7 +255,7 @@ function main(): void {
   }
 
   console.log(
-    `check-no-secrets: quét ${scannedFiles} file văn bản (${scannedBytes} byte) trong dist/, bỏ qua ${skippedBinary} file nhị phân.`,
+    `check-no-secrets: quét ${scannedFiles} chunk văn bản (${scannedBytes} byte) trong dist/, bỏ qua ${skippedBinary} chunk nhị phân, mở ${expandedArchives} archive zip để quét từng entry bên trong.`,
   );
   console.log(
     `check-no-secrets: đối chiếu ${nameTargets.length} tên biến và ${valueTargets.length} giá trị biến không có tiền tố ${PUBLIC_PREFIX}.`,

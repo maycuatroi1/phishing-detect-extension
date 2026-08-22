@@ -46,7 +46,17 @@ pnpm --filter extension typecheck
 pnpm --filter extension test
 pnpm --filter extension test:contract
 pnpm --filter extension test:kanon
+pnpm --filter extension package
 ```
+
+`package` chạy sau `build` và sinh `dist/extension.zip` để cài tay hoặc nộp store. Zip xác định
+được: gói hai lần trên cùng một `dist/` ra file giống hệt nhau về byte.
+
+## Riêng tư
+
+`PRIVACY.md` nêu đúng từng tier gửi gì đi đâu, gồm cả phần mà k-anonymity của tier 1 **không** giấu
+được: một request lookup vẫn nói với server rằng máy này vừa mở một trang lạ vào lúc đó, nên nhịp
+duyệt web vẫn lộ dù không tên miền nào lộ. Đọc mục "Điều tier 1 không giấu được".
 
 ## Quyền
 
