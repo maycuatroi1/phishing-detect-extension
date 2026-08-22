@@ -18,6 +18,7 @@ import { resolveWarningLevel, type WarningLevel } from "../lib/warning-level.ts"
 import { panelView, type PanelModel, type PanelView } from "./scan-panel.ts";
 import { reportPanelView, type ReportModel, type ReportPanelView } from "./report-panel.ts";
 import { warningPanelView, type WarningModel, type WarningPanelView } from "./warning-panel.ts";
+import { statusPanelView, type StatusModel, type StatusPanelView } from "./status-panel.ts";
 import {
   autoScanPanelView,
   type AutoScanModel,
@@ -95,6 +96,20 @@ function renderWarning(view: WarningPanelView): void {
   setSlot("warning-headline", view.headline);
   setSlot("warning-detail", view.detail);
   dressButton("dismiss-warning", view.buttonLabel, view.buttonEnabled);
+}
+
+function renderStatus(view: StatusPanelView): void {
+  setSlot("status-badge", view.badge);
+  const badge = slot("status-badge");
+  if (badge !== null) {
+    badge.style.backgroundColor = view.color;
+  }
+  setSlot("status-headline", view.headline);
+  setSlot("status-detail", view.detail);
+}
+
+function applyStatus(model: StatusModel): void {
+  renderStatus(statusPanelView(model));
 }
 
 function renderReport(view: ReportPanelView): void {
@@ -260,6 +275,7 @@ async function startWarning(url: string | null): Promise<void> {
   const host = url === null ? null : hostOfUrl(url);
   if (host === null) {
     applyWarning({ kind: "unsupported" });
+    applyStatus({ kind: "unsupported" });
     return;
   }
 
@@ -270,6 +286,7 @@ async function startWarning(url: string | null): Promise<void> {
   const levelNow = (): WarningLevel => resolveWarningLevel({ verdict, dispute, dismissal });
 
   applyWarning({ kind: "ready", level: levelNow(), dismissal });
+  applyStatus({ kind: "ready", verdict, level: levelNow() });
 
   const button = actionButton("dismiss-warning");
   if (button === null) {
@@ -294,9 +311,11 @@ async function startWarning(url: string | null): Promise<void> {
       .then(async () => {
         dismissal = await currentDismissal(host);
         applyWarning({ kind: "ready", level: levelNow(), dismissal });
+        applyStatus({ kind: "ready", verdict, level: levelNow() });
       })
       .catch(() => {
         applyWarning({ kind: "ready", level: levelNow(), dismissal });
+        applyStatus({ kind: "ready", verdict, level: levelNow() });
       })
       .finally(() => {
         saving = false;

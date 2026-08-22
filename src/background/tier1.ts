@@ -4,40 +4,50 @@ import { createLookupBatcher, type LookupBatcher } from "../lib/lookup-batch.ts"
 import { lookupHostTier1, type Tier1Verdict } from "../lib/tier1.ts";
 import {
   DISMISS_HINT,
-  HARD_WARNING_TEXT,
+  LEGIT_COLOR,
+  NG_TEXT,
+  NO_DATA_NOT_SAFE,
+  OK_MEANS_NO_FINDING,
+  OK_TEXT,
+  PENDING_COLOR,
+  PHISHING_COLOR,
   REPORT_HINT,
-  evaluateTab,
-  paintLook,
-  userAdjustedLook,
+  UNKNOWN_COLOR,
   type BadgeLook,
-} from "./tier0.ts";
+} from "../lib/badge.ts";
+import { evaluateTab, paintLook, userAdjustedLook } from "./tier0.ts";
 import type { Tier0Verdict } from "../lib/tier0.ts";
 
 const BADGE_BY_TIER1_VERDICT: Record<Tier1Verdict, BadgeLook> = {
   phishing: {
-    text: HARD_WARNING_TEXT,
-    color: "#c62828",
-    title: `Anti-Fraud: corpus đánh dấu trang này là lừa đảo. ${REPORT_HINT} ${DISMISS_HINT}`,
+    state: "phishing",
+    text: NG_TEXT,
+    color: PHISHING_COLOR,
+    title: `Anti-Fraud: NG màu đỏ. Corpus đánh dấu trang này là lừa đảo. ${REPORT_HINT} ${DISMISS_HINT}`,
   },
   legit: {
-    text: "OK",
-    color: "#2e7d32",
-    title: "Anti-Fraud: corpus đánh dấu trang này là hợp lệ",
+    state: "legit",
+    text: OK_TEXT,
+    color: LEGIT_COLOR,
+    title: "Anti-Fraud: OK màu xanh lá. Corpus đánh dấu trang này là hợp lệ.",
   },
   unknown: {
-    text: "",
-    color: "#5a616e",
-    title: "Anti-Fraud: corpus có trang này nhưng chưa kết luận",
+    state: "unknown",
+    text: OK_TEXT,
+    color: UNKNOWN_COLOR,
+    title: `Anti-Fraud: OK màu xám xanh. Corpus có trang này nhưng chưa kết luận. ${NO_DATA_NOT_SAFE} ${OK_MEANS_NO_FINDING}`,
   },
   absent: {
-    text: "",
-    color: "#5a616e",
-    title: "Anti-Fraud: corpus không có trang này",
+    state: "unknown",
+    text: OK_TEXT,
+    color: UNKNOWN_COLOR,
+    title: `Anti-Fraud: OK màu xám xanh. Corpus không có trang này. ${NO_DATA_NOT_SAFE} ${OK_MEANS_NO_FINDING}`,
   },
   unavailable: {
-    text: "",
-    color: "#5a616e",
-    title: "Anti-Fraud: chưa hỏi được, chưa kết luận cho trang này",
+    state: "pending",
+    text: OK_TEXT,
+    color: PENDING_COLOR,
+    title: `Anti-Fraud: OK màu xám đậm. Chưa hỏi được server nên chưa kết luận cho trang này. ${OK_MEANS_NO_FINDING}`,
   },
 };
 

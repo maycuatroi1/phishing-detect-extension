@@ -3,11 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DISMISSED_LOOK,
   DISPUTED_LOOK,
-  HARD_WARNING_TEXT,
-  SOFT_WARNING_TEXT,
+  NG_TEXT,
+  OK_TEXT,
   badgeLookFor,
   evaluateTab,
   isWarningLook,
+  lookForLevel,
   userAdjustedLook,
 } from "../src/background/tier0.ts";
 import { AUTO_SCAN_WARNING_LOOK, knownVerdictOf } from "../src/background/auto-scan.ts";
@@ -231,16 +232,18 @@ describe("một entry mềm không bao giờ trở thành một entry cứng", (
     expect(afblContains(record.phish, await hostEntryOf(SOFT_HOST))).toBe(false);
   });
 
-  it("badge của host mềm là màu hổ phách với chữ riêng, không phải badge đỏ", async () => {
+  it("badge của host mềm là NG màu hổ phách, không phải NG màu đỏ", async () => {
     expect(await evaluateTab(51, `https://${SOFT_HOST}/khuyen-mai`)).toBe("soft");
 
-    expect(badgeText()).toBe("~");
-    expect(badgeText()).toBe(SOFT_WARNING_TEXT);
-    expect(badgeText()).not.toBe("!");
-    expect(badgeText()).not.toBe(HARD_WARNING_TEXT);
+    expect(badgeText()).toBe("NG");
+    expect(badgeText()).toBe(NG_TEXT);
     expect(badgeColor()).toBe("#ef6c00");
     expect(badgeColor()).not.toBe("#c62828");
     expect(badgeColor()).not.toBe(badgeLookFor("phishing").color);
+
+    expect(await evaluateTab(52, `https://${PHISH_HOST}/dang-nhap`)).toBe("phishing");
+    expect(badgeText()).toBe("NG");
+    expect(badgeColor()).toBe("#c62828");
   });
 
   it("tooltip mức mềm nói thẳng là máy đánh dấu và chưa người nào kiểm chứng", async () => {
@@ -255,11 +258,11 @@ describe("một entry mềm không bao giờ trở thành một entry cứng", (
     expect(badgeTitle()).not.toContain("chưa có người kiểm chứng");
   });
 
-  it("badge đỏ và badge hổ phách khác nhau ở cả ba trường, nên không ai nhầm hai mức", () => {
+  it("badge đỏ và badge hổ phách cùng chữ NG nhưng khác màu và khác tooltip", () => {
     const hard = badgeLookFor("phishing");
     const soft = badgeLookFor("soft");
 
-    expect(soft.text).not.toBe(hard.text);
+    expect(soft.text).toBe(hard.text);
     expect(soft.color).not.toBe(hard.color);
     expect(soft.title).not.toBe(hard.title);
     expect(isWarningLook(soft)).toBe(true);
@@ -269,9 +272,9 @@ describe("một entry mềm không bao giờ trở thành một entry cứng", (
   });
 
   it("kết luận is_scam của model trong lượt tự quét cũng là hổ phách, không phải đỏ", () => {
-    expect(AUTO_SCAN_WARNING_LOOK.text).toBe(SOFT_WARNING_TEXT);
-    expect(AUTO_SCAN_WARNING_LOOK.text).not.toBe(HARD_WARNING_TEXT);
+    expect(AUTO_SCAN_WARNING_LOOK.text).toBe(NG_TEXT);
     expect(AUTO_SCAN_WARNING_LOOK.color).toBe(badgeLookFor("soft").color);
+    expect(AUTO_SCAN_WARNING_LOOK.color).not.toBe(badgeLookFor("phishing").color);
     expect(AUTO_SCAN_WARNING_LOOK.title).toContain("chưa có người kiểm chứng");
   });
 });
@@ -321,6 +324,8 @@ describe("bốn mức chồng lên nhau theo đúng một thứ tự", () => {
       const painted = await userAdjustedLook(SOFT_HOST, badgeLookFor(item.verdict));
       const label = `${item.verdict} + ${item.dispute?.claim ?? "không report"} + ${item.dismissal === null ? "chưa tắt" : "đã tắt"}`;
 
+      expect(lookForLevel(item.verdict, item.level), `popup lệch badge: ${label}`).toEqual(painted);
+
       if (item.level === "dismissed") {
         expect(painted, label).toEqual(DISMISSED_LOOK);
       } else if (item.level === "disputed") {
@@ -343,10 +348,12 @@ describe("bốn mức chồng lên nhau theo đúng một thứ tự", () => {
 
     expect(await evaluateTab(61, `https://${SOFT_HOST}/khuyen-mai`)).toBe("soft");
     expect(badgeText()).toBe(DISPUTED_LOOK.text);
-    expect(badgeText()).not.toBe(SOFT_WARNING_TEXT);
+    expect(badgeColor()).toBe(DISPUTED_LOOK.color);
+    expect(badgeColor()).not.toBe(badgeLookFor("soft").color);
 
     expect(await evaluateTab(62, `https://${PHISH_HOST}/dang-nhap`)).toBe("phishing");
-    expect(badgeText()).toBe(HARD_WARNING_TEXT);
+    expect(badgeText()).toBe(NG_TEXT);
+    expect(badgeColor()).toBe(badgeLookFor("phishing").color);
   });
 
   it("tắt hẳn nuốt luôn badge mềm của server", async () => {
@@ -357,7 +364,9 @@ describe("bốn mức chồng lên nhau theo đúng một thứ tự", () => {
 
     expect(await evaluateTab(63, `https://${SOFT_HOST}/khuyen-mai`)).toBe("soft");
     expect(badgeText()).toBe(DISMISSED_LOOK.text);
-    expect(badgeText()).toBe("");
+    expect(badgeText()).toBe(OK_TEXT);
+    expect(badgeText()).not.toBe("");
+    expect(badgeColor()).toBe(DISMISSED_LOOK.color);
   });
 });
 

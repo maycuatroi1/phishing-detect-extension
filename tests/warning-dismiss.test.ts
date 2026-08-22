@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DISMISSED_LOOK,
   DISPUTED_LOOK,
-  HARD_WARNING_TEXT,
+  NG_TEXT,
   badgeLookFor,
   evaluateTab,
   quietIfDismissed,
@@ -97,7 +97,7 @@ describe("một cú bấm tắt cảnh báo, một cú bấm nữa bật lại",
   it("chưa tắt thì badge vẫn là cảnh báo cứng và title chỉ đường tới nút tắt", async () => {
     expect(await evaluateTab(41, PHISH_URL)).toBe("phishing");
 
-    expect(badgeText()).toBe(HARD_WARNING_TEXT);
+    expect(badgeText()).toBe(NG_TEXT);
     expect(badgeTitle()).toContain(DISMISS_LABEL);
     expect(badgeTitle()).toContain("không chặn");
   });
@@ -107,7 +107,8 @@ describe("một cú bấm tắt cảnh báo, một cú bấm nữa bật lại",
 
     expect(await evaluateTab(41, PHISH_URL)).toBe("phishing");
     expect(badgeText()).toBe(DISMISSED_LOOK.text);
-    expect(badgeText()).not.toBe(HARD_WARNING_TEXT);
+    expect(badgeText()).not.toBe("");
+    expect(badgeText()).not.toBe(NG_TEXT);
     expect(badgeTitle()).toBe(DISMISSED_LOOK.title);
     expect(badgeTitle()).toContain(RESTORE_LABEL);
   });
@@ -120,7 +121,7 @@ describe("một cú bấm tắt cảnh báo, một cú bấm nữa bật lại",
     await clearDismissal(PHISH_HOST);
     await evaluateTab(41, PHISH_URL);
 
-    expect(badgeText()).toBe(HARD_WARNING_TEXT);
+    expect(badgeText()).toBe(NG_TEXT);
     expect(await readDismissal(PHISH_HOST)).toBeNull();
   });
 

@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DISPUTED_LOOK,
-  HARD_WARNING_TEXT,
+  NG_TEXT,
   badgeLookFor,
   evaluateTab,
   softenIfDisputed,
@@ -105,21 +105,21 @@ afterEach(() => {
 describe("một cú bấm báo nhầm hạ cảnh báo xuống mức mềm ngay trên máy", () => {
   it("trước khi báo thì badge là cảnh báo cứng và nó chỉ đường tới nút báo nhầm", async () => {
     expect(await evaluateTab(21, PHISH_URL)).toBe("phishing");
-    expect(badgeText()).toBe(HARD_WARNING_TEXT);
+    expect(badgeText()).toBe(NG_TEXT);
     expect(badgeColor()).toBe(badgeLookFor("phishing").color);
     expect(badgeTitle()).toContain("Báo cảnh báo nhầm");
   });
 
   it("sau khi báo nhầm thì cùng một lần điều hướng cho badge mềm", async () => {
     await evaluateTab(21, PHISH_URL);
-    expect(badgeText()).toBe(HARD_WARNING_TEXT);
+    expect(badgeText()).toBe(NG_TEXT);
 
     await fileFalsePositive(PHISH_URL);
 
     expect(await evaluateTab(21, PHISH_URL)).toBe("phishing");
     expect(badgeText()).toBe(DISPUTED_LOOK.text);
-    expect(badgeText()).not.toBe(HARD_WARNING_TEXT);
     expect(badgeColor()).toBe(DISPUTED_LOOK.color);
+    expect(badgeColor()).not.toBe(badgeLookFor("phishing").color);
     expect(badgeTitle()).toContain("mức mềm");
   });
 
@@ -134,10 +134,11 @@ describe("một cú bấm báo nhầm hạ cảnh báo xuống mức mềm ngay 
     await fileFalsePositive(PHISH_URL);
     await evaluateTab(21, PHISH_URL);
     expect(badgeText()).toBe(DISPUTED_LOOK.text);
+    expect(badgeColor()).toBe(DISPUTED_LOOK.color);
 
     await clearDispute(PHISH_HOST);
     await evaluateTab(21, PHISH_URL);
-    expect(badgeText()).toBe(HARD_WARNING_TEXT);
+    expect(badgeText()).toBe(NG_TEXT);
     expect(badgeColor()).toBe(badgeLookFor("phishing").color);
   });
 
@@ -145,7 +146,7 @@ describe("một cú bấm báo nhầm hạ cảnh báo xuống mức mềm ngay 
     await filePhishing(PHISH_URL);
 
     expect(await evaluateTab(21, PHISH_URL)).toBe("phishing");
-    expect(badgeText()).toBe(HARD_WARNING_TEXT);
+    expect(badgeText()).toBe(NG_TEXT);
     expect(badgeColor()).toBe(badgeLookFor("phishing").color);
   });
 

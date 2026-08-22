@@ -23,7 +23,7 @@ import {
   writeAutoScanEnabled,
 } from "../../src/lib/auto-scan-store.ts";
 import { RISK_THRESHOLD, isHighRisk, scoreHost } from "../../src/lib/risk.ts";
-import { HARD_WARNING_TEXT, SOFT_WARNING_TEXT } from "../../src/background/tier0.ts";
+import { NG_TEXT, badgeLookFor } from "../../src/background/tier0.ts";
 import { entriesFor } from "../helpers/fixture.ts";
 import { encodeAfbl } from "../../src/lib/afbl.ts";
 import { manualClock } from "../helpers/clock.ts";
@@ -71,7 +71,9 @@ const TWELVE_HIGH_RISK_HOSTS = [
 ];
 
 const setBadgeText = vi.fn(async (_details: { tabId: number; text: string }) => undefined);
-const setBadgeBackgroundColor = vi.fn(async () => undefined);
+const setBadgeBackgroundColor = vi.fn(
+  async (_details: { tabId: number; color: string }) => undefined,
+);
 const setTitle = vi.fn(async () => undefined);
 
 let clock = manualClock();
@@ -156,9 +158,16 @@ describe("tự quét chỉ chạy sau khi qua cổng lọc", () => {
 
     expect(tap.requests.filter(isScanPost)).toHaveLength(1);
     expect(countInstallRequests(tap.requests)).toBe(1);
-    expect(setBadgeText.mock.calls.some((call) => call[0].text === SOFT_WARNING_TEXT)).toBe(true);
+    expect(setBadgeText.mock.calls.some((call) => call[0].text === NG_TEXT)).toBe(true);
     expect(
-      setBadgeText.mock.calls.some((call) => call[0].text === HARD_WARNING_TEXT),
+      setBadgeBackgroundColor.mock.calls.some(
+        (call) => call[0].color === badgeLookFor("soft").color,
+      ),
+    ).toBe(true);
+    expect(
+      setBadgeBackgroundColor.mock.calls.some(
+        (call) => call[0].color === badgeLookFor("phishing").color,
+      ),
       "một verdict của model không được sơn badge đỏ, đó là badge của mức đã có người xác nhận",
     ).toBe(false);
 

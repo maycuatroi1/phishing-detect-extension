@@ -4,19 +4,19 @@ import { hostOfUrl } from "../lib/host.ts";
 import {
   DISMISS_HINT,
   MACHINE_UNVERIFIED_TEXT,
+  NG_TEXT,
+  SOFT_COLOR,
   SOFT_REPORT_HINT,
-  SOFT_WARNING_TEXT,
-  badgeLookFor,
-  paintLook,
-  userAdjustedLook,
   type BadgeLook,
-} from "./tier0.ts";
+} from "../lib/badge.ts";
+import { paintLook, userAdjustedLook } from "./tier0.ts";
 import { evaluateTabTiered } from "./tier1.ts";
 
 export const AUTO_SCAN_WARNING_LOOK: BadgeLook = {
-  text: SOFT_WARNING_TEXT,
-  color: badgeLookFor("soft").color,
-  title: `Anti-Fraud: trang này chưa có trong danh sách nào, nhưng điểm rủi ro của tên miền đủ cao nên extension đã tự quét sâu, và model nói đây là trang lừa đảo. ${MACHINE_UNVERIFIED_TEXT} Mở popup để xem những tín hiệu nào đã kích hoạt. ${SOFT_REPORT_HINT} ${DISMISS_HINT}`,
+  state: "soft",
+  text: NG_TEXT,
+  color: SOFT_COLOR,
+  title: `Anti-Fraud: NG màu hổ phách. Trang này chưa có trong danh sách nào, nhưng điểm rủi ro của tên miền đủ cao nên extension đã tự quét sâu, và model nói đây là trang lừa đảo. ${MACHINE_UNVERIFIED_TEXT} Mở popup để xem những tín hiệu nào đã kích hoạt. ${SOFT_REPORT_HINT} ${DISMISS_HINT}`,
 };
 
 export function knownVerdictOf(verdict: string): KnownVerdict {

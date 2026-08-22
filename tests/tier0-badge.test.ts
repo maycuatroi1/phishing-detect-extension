@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { badgeLookFor, evaluateTab } from "../src/background/tier0.ts";
+import { NG_TEXT, OK_TEXT, badgeLookFor, evaluateTab } from "../src/background/tier0.ts";
 import { clearStoredBlocklist, writeStoredBlocklist } from "../src/lib/blocklist-store.ts";
 import { decodeAfbl } from "../src/lib/afbl.ts";
 import { invalidateTier0Cache } from "../src/lib/tier0.ts";
@@ -77,7 +77,8 @@ describe("badge đổi theo artifact fixture, và đường tra không chạm m�
     expect(badgeText()).toBe(badgeLookFor("phishing").text);
     expect(badgeText()).not.toBe("");
     expect(badgeColor()).toBe(badgeLookFor("phishing").color);
-    expect(setBadgeText).toHaveBeenCalledWith({ tabId: 11, text: "!" });
+    expect(setBadgeText).toHaveBeenCalledWith({ tabId: 11, text: NG_TEXT });
+    expect(badgeText()).toBe("NG");
     expect(setTitle.mock.lastCall?.[0].title).toContain("lừa đảo");
   });
 
@@ -89,21 +90,28 @@ describe("badge đổi theo artifact fixture, và đường tra không chạm m�
     expect(networkCalls).toEqual([]);
   });
 
-  it("host trong danh sách legit và host lạ cho badge khác hẳn badge cảnh báo", async () => {
+  it("host legit và host lạ cùng ra OK nhưng khác màu và khác tooltip", async () => {
     expect(await evaluateTab(12, `https://${LEGIT_HOST}/`)).toBe("legit");
     expect(badgeText()).toBe("OK");
+    expect(badgeText()).toBe(OK_TEXT);
+    expect(badgeColor()).toBe(badgeLookFor("legit").color);
 
     expect(await evaluateTab(13, `https://${UNSEEN_HOST}/`)).toBe("unknown");
-    expect(badgeText()).toBe("");
+    expect(badgeText()).toBe("OK");
+    expect(badgeColor()).toBe(badgeLookFor("unknown").color);
+    expect(badgeColor()).not.toBe(badgeLookFor("legit").color);
+    expect(setTitle.mock.lastCall?.[0].title.toLowerCase()).toContain("chưa có dữ liệu");
   });
 
   it("subdomain của host phish không bị gán nhầm, entry là băm của đúng host", async () => {
     expect(await evaluateTab(14, `https://www.${PHISH_HOST}/`)).toBe("unknown");
   });
 
-  it("URL không phải http hay https thì không tra và badge sạch", async () => {
+  it("URL không phải http hay https thì không tra, badge về mức chưa có dữ liệu chứ không trống", async () => {
     expect(await evaluateTab(15, "chrome://extensions")).toBe("unknown");
-    expect(badgeText()).toBe("");
+    expect(badgeText()).toBe("OK");
+    expect(badgeText()).not.toBe("");
+    expect(badgeColor()).toBe(badgeLookFor("unknown").color);
     expect(networkCalls).toEqual([]);
   });
 
@@ -112,8 +120,8 @@ describe("badge đổi theo artifact fixture, và đường tra không chạm m�
     await evaluateTab(12, `https://${UNSEEN_HOST}/`);
 
     expect(setBadgeText.mock.calls.map((call) => call[0])).toEqual([
-      { tabId: 11, text: "!" },
-      { tabId: 12, text: "" },
+      { tabId: 11, text: "NG" },
+      { tabId: 12, text: "OK" },
     ]);
   });
 });

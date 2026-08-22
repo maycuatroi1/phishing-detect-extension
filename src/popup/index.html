@@ -89,12 +89,29 @@
       ul:empty {
         margin: 0;
       }
+      .badge {
+        display: inline-block;
+        min-width: 26px;
+        margin-right: 6px;
+        padding: 1px 6px;
+        border-radius: 4px;
+        background: var(--muted);
+        color: #ffffff;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-align: center;
+      }
     </style>
   </head>
   <body>
     <h1>Anti-Fraud</h1>
     <p>Tier 0 tra danh sách tải sẵn ngay trong máy. Duyệt web không gửi gì đi đâu.</p>
     <p>Extension chỉ cảnh báo, không chặn trang, không chuyển hướng, không chèn trang khoá.</p>
+    <section>
+      <p class="headline"><span class="badge" data-slot="status-badge">-</span><span data-slot="status-headline">Đang đọc trạng thái trang</span></p>
+      <p data-slot="status-detail">-</p>
+    </section>
     <section>
       <p class="headline" data-slot="warning-headline">Đang đọc trạng thái cảnh báo</p>
       <p data-slot="warning-detail">-</p>
