@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RISK_THRESHOLD, isHighRisk, scoreHost } from "../../src/lib/risk.ts";
+import {
+  DROPPED_GATED_SUFFIXES,
+  GATED_SUFFIXES,
+  RISK_THRESHOLD,
+  isHighRisk,
+  scoreHost,
+} from "../../src/lib/risk.ts";
 import { reachableFrom, readSource } from "../helpers/imports.ts";
 
 const WHITELIST_NEAR_MISSES = [
@@ -40,8 +46,6 @@ const WHITELIST_GATED = [
   "hanoi.gov.vn",
   "aichallenge.hochiminhcity.gov.vn",
   "angiang.toaan.gov.vn",
-  "angiang.edu.vn",
-  "hust.edu.vn",
   "dilinh.lamdong.dcs.vn",
 ];
 
@@ -205,12 +209,38 @@ describe("hiệu chuẩn ngưỡng đo trên corpus eval-v1", () => {
     }
   });
 
-  it("host .gov.vn, .edu.vn và .dcs.vn được miễn quét chứ không chỉ dưới ngưỡng", () => {
+  it("host .gov.vn và .dcs.vn được miễn quét chứ không chỉ dưới ngưỡng", () => {
     for (const host of WHITELIST_GATED) {
       const risk = scoreHost(host);
       expect(risk.exempt, `${host} phải được miễn`).toBe(true);
       expect(risk.exemptReason).not.toBeNull();
       expect(isHighRisk(risk)).toBe(false);
+    }
+  });
+
+  it("đuôi trường học KHÔNG được miễn, vì corpus có một trang lừa đảo nằm ngay dưới đó", () => {
+    expect(scoreHost("dichvu4g.edu.vn").exempt).toBe(false);
+
+    for (const host of ["angiang.edu.vn", "hust.edu.vn", "sinhvien.ac.vn", "mit.edu"]) {
+      expect(scoreHost(host).exempt, `${host} không được miễn quét`).toBe(false);
+    }
+  });
+
+  it("mọi đuôi đã bỏ khỏi danh sách miễn đều thật sự hết được miễn", () => {
+    expect(DROPPED_GATED_SUFFIXES.length).toBeGreaterThan(0);
+
+    for (const suffix of DROPPED_GATED_SUFFIXES) {
+      expect(GATED_SUFFIXES).not.toContain(suffix);
+      expect(scoreHost(`mot-trang-la.${suffix}`).exempt, suffix).toBe(false);
+    }
+  });
+
+  it("đuôi còn được miễn đều là đuôi của cơ quan nhà nước hoặc quân đội", () => {
+    for (const suffix of GATED_SUFFIXES) {
+      expect(
+        /(^|\.)(gov|mil|int|dcs)(\.|$)/.test(suffix),
+        `${suffix} không phải đuôi cơ quan nhà nước, không được miễn quét`,
+      ).toBe(true);
     }
   });
 

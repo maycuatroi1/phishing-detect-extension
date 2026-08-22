@@ -39,21 +39,32 @@ export interface HostRisk {
 
 export const GATED_SUFFIXES: readonly string[] = [
   "gov.vn",
-  "edu.vn",
-  "ac.vn",
-  "org.vn",
   "dcs.vn",
   "gov",
-  "edu",
   "mil",
   "int",
   "gov.uk",
-  "ac.uk",
-  "edu.au",
   "gov.au",
-  "edu.sg",
   "gov.sg",
 ];
+
+export const DROPPED_GATED_SUFFIXES: readonly string[] = [
+  "edu.vn",
+  "ac.vn",
+  "org.vn",
+  "edu",
+  "ac.uk",
+  "edu.au",
+  "edu.sg",
+];
+
+export const GATED_MEANS_NOT_FOR_SALE =
+  "Miễn quét là nói rằng đuôi này không mua trôi nổi được, nên một trang lừa đảo không dựng lên " +
+  "dưới đó được. Câu đó đúng với đuôi của cơ quan nhà nước và quân đội, và sai với đuôi trường " +
+  "học: một trang sinh viên bị chiếm hoặc một subdomain bị bỏ quên là đường dựng trang lừa đảo cũ " +
+  "bằng chính Internet. Đo trên corpus production ngày 2026-08-23: .gov.vn có 701 host, 0 host lừa " +
+  "đảo; .edu.vn có 68 host và trong đó có dichvu4g.edu.vn đã được người xác nhận là lừa đảo. Một " +
+  "counterexample là đủ, vì miễn quét nghĩa là KHÔNG BAO GIỜ nhìn tới nó.";
 
 export const MULTI_LABEL_SUFFIXES: readonly string[] = [
   "com.vn",
