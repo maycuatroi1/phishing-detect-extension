@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Anti-Fraud</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #16181d;
+        --muted: #5a616e;
+        --line: #e3e6ec;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #14161a;
+          --fg: #eef0f4;
+          --muted: #9aa2b1;
+          --line: #2a2e36;
+        }
+      }
+      body {
+        width: 300px;
+        margin: 0;
+        padding: 14px 16px;
+        background: var(--bg);
+        color: var(--fg);
+        font: 13px/1.5 system-ui, "Segoe UI", sans-serif;
+      }
+      h1 {
+        margin: 0 0 2px;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      p {
+        margin: 0;
+        color: var(--muted);
+      }
+      dl {
+        margin: 12px 0 0;
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 4px 10px;
+      }
+      dt {
+        color: var(--muted);
+      }
+      dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Anti-Fraud</h1>
+    <p>Bộ khung MV3. Chưa có tier phát hiện nào được bật.</p>
+    <dl>
+      <dt>API</dt>
+      <dd data-slot="api-base-url">-</dd>
+      <dt>Tier</dt>
+      <dd data-slot="tiers">-</dd>
+    </dl>
+    <script type="module" src="./popup.ts"></script>
+  </body>
+</html>
