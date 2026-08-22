@@ -2,14 +2,21 @@ import { API_BASE_URL } from "../config.ts";
 import { hostOfUrl } from "../lib/host.ts";
 import { createLookupBatcher, type LookupBatcher } from "../lib/lookup-batch.ts";
 import { lookupHostTier1, type Tier1Verdict } from "../lib/tier1.ts";
-import { evaluateTab, paintLook, type BadgeLook } from "./tier0.ts";
+import {
+  HARD_WARNING_TEXT,
+  REPORT_HINT,
+  evaluateTab,
+  paintLook,
+  softenIfDisputed,
+  type BadgeLook,
+} from "./tier0.ts";
 import type { Tier0Verdict } from "../lib/tier0.ts";
 
 const BADGE_BY_TIER1_VERDICT: Record<Tier1Verdict, BadgeLook> = {
   phishing: {
-    text: "!",
+    text: HARD_WARNING_TEXT,
     color: "#c62828",
-    title: "Anti-Fraud: corpus đánh dấu trang này là lừa đảo",
+    title: `Anti-Fraud: corpus đánh dấu trang này là lừa đảo. ${REPORT_HINT}`,
   },
   legit: {
     text: "OK",
@@ -59,7 +66,7 @@ export function useLookupBatcher(batcher: LookupBatcher | null): void {
 
 export async function escalateTab(tabId: number, host: string): Promise<Tier1Verdict> {
   const result = await lookupHostTier1(host, tier1Batcher());
-  await paintLook(tabId, tier1BadgeLookFor(result.verdict));
+  await paintLook(tabId, await softenIfDisputed(host, tier1BadgeLookFor(result.verdict)));
   return result.verdict;
 }
 

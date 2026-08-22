@@ -1,9 +1,14 @@
 import { API_BASE_URL } from "../config.ts";
 import { BLOCKLIST_REFRESH_PERIOD_MINUTES, syncBlocklist } from "../lib/blocklist-sync.ts";
+import { readDispute, softensWarning } from "../lib/dispute-store.ts";
 import { hostOfUrl } from "../lib/host.ts";
 import { invalidateTier0Cache, lookupHost, type Tier0Verdict } from "../lib/tier0.ts";
 
 export const BLOCKLIST_ALARM_NAME = "blocklist-refresh";
+
+export const HARD_WARNING_TEXT = "!";
+
+export const REPORT_HINT = "Nếu đây là cảnh báo nhầm, mở popup và bấm Báo cảnh báo nhầm, đúng một cú bấm.";
 
 export interface BadgeLook {
   readonly text: string;
@@ -11,11 +16,18 @@ export interface BadgeLook {
   readonly title: string;
 }
 
+export const DISPUTED_LOOK: BadgeLook = {
+  text: "?",
+  color: "#8d6e00",
+  title:
+    "Anti-Fraud: bạn đã báo trang này bị cảnh báo nhầm, nên cảnh báo đang ở mức mềm trong lúc chờ moderator xem lại",
+};
+
 const BADGE_BY_VERDICT: Record<Tier0Verdict, BadgeLook> = {
   phishing: {
-    text: "!",
+    text: HARD_WARNING_TEXT,
     color: "#c62828",
-    title: "Anti-Fraud: trang này nằm trong danh sách lừa đảo đã xác nhận",
+    title: `Anti-Fraud: trang này nằm trong danh sách lừa đảo đã xác nhận. ${REPORT_HINT}`,
   },
   legit: {
     text: "OK",
@@ -44,6 +56,18 @@ export async function paintLook(tabId: number, look: BadgeLook): Promise<void> {
   await chrome.action.setTitle({ tabId, title: look.title });
 }
 
+export async function softenIfDisputed(host: string, look: BadgeLook): Promise<BadgeLook> {
+  if (look.text !== HARD_WARNING_TEXT) {
+    return look;
+  }
+
+  try {
+    return softensWarning(await readDispute(host)) ? DISPUTED_LOOK : look;
+  } catch {
+    return look;
+  }
+}
+
 export async function paintBadge(tabId: number, verdict: Tier0Verdict): Promise<void> {
   await paintLook(tabId, badgeLookFor(verdict));
 }
@@ -56,7 +80,7 @@ export async function evaluateTab(tabId: number, url: string | undefined): Promi
   }
 
   const result = await lookupHost(host);
-  await paintBadge(tabId, result.verdict);
+  await paintLook(tabId, await softenIfDisputed(host, badgeLookFor(result.verdict)));
   return result.verdict;
 }
 
