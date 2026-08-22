@@ -19,7 +19,22 @@ export const SCAN_BUTTON_LABEL = "Quét sâu trang này";
 export const SCAN_BUTTON_BUSY_LABEL = "Đang quét...";
 
 export const IDLE_DETAIL =
-  "Quét sâu gửi URL đầy đủ của tab này lên server và tốn một lượt trong hạn mức. Nó chỉ chạy khi bạn bấm nút, không bao giờ tự chạy lúc bạn duyệt web.";
+  "Quét sâu gửi URL đầy đủ của tab này lên server và luôn tốn một lượt trong hạn mức, kể cả khi host đã có kết quả cũ. Đó là khác biệt với lượt tự quét: tự quét nhận lại kết quả cũ nếu có, còn nút này bắt server nhìn lại trang ngay bây giờ.";
+
+export const CACHED_HEADLINE = "Đã có kết quả sẵn";
+
+export function ageInWords(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds} giây trước`;
+  }
+  if (seconds < 3600) {
+    return `${Math.floor(seconds / 60)} phút trước`;
+  }
+  if (seconds < 86_400) {
+    return `${Math.floor(seconds / 3600)} giờ trước`;
+  }
+  return `${Math.floor(seconds / 86_400)} ngày trước`;
+}
 
 export function formatInstant(iso: string): string {
   const at = new Date(iso);
@@ -139,6 +154,24 @@ export function panelView(model: PanelModel): PanelView {
     return {
       headline: "Chưa có kết luận",
       detail: `Đã hỏi ${outcome.polls} lần mà lần quét ${outcome.scanId} vẫn chưa xong. Mở lại popup để hỏi tiếp. Còn ${outcome.quotaRemaining} lượt.`,
+      resetAt: null,
+      scanEnabled: true,
+      buttonLabel: SCAN_BUTTON_LABEL,
+    };
+  }
+
+  if (outcome.kind === "cached") {
+    const cached = outcome.cached;
+    const verdict = cached.isScam
+      ? "Một lượt quét trước đó kết luận đây là trang lừa đảo."
+      : "Một lượt quét trước đó không thấy dấu hiệu lừa đảo.";
+    return {
+      headline: CACHED_HEADLINE,
+      detail:
+        `${verdict} Kết quả cho host ${cached.host}, quét lúc ${formatInstant(cached.checkedAt)}, ` +
+        `tức ${ageInWords(cached.cacheAgeSeconds)}. Lượt này không tốn hạn mức nào, còn ` +
+        `${cached.quotaRemaining} lượt. Kết quả tính theo host chứ không theo từng đường dẫn, ` +
+        "nên nếu bạn nghi đúng trang này thì bấm nút để bắt server quét lại ngay.",
       resetAt: null,
       scanEnabled: true,
       buttonLabel: SCAN_BUTTON_LABEL,

@@ -4,6 +4,7 @@ import {
   fetchVerdict,
   startScan,
   isTerminal,
+  type ScanCached,
   type ScanDeps,
   type VerdictEnvelope,
 } from "./scan.ts";
@@ -47,7 +48,8 @@ export type ManualScanOutcome =
       readonly scanId: string;
       readonly polls: number;
       readonly quotaRemaining: number;
-    };
+    }
+  | { readonly kind: "cached"; readonly cached: ScanCached };
 
 export interface Tier2Deps {
   readonly baseUrl: string;
@@ -151,7 +153,11 @@ async function pollUntilTerminal(
   return { kind: "pending", polls: maxAttempts };
 }
 
-export async function runManualScan(deps: Tier2Deps, url: string): Promise<ManualScanOutcome> {
+export async function runManualScan(
+  deps: Tier2Deps,
+  url: string,
+  forceFresh = false,
+): Promise<ManualScanOutcome> {
   const sleep = deps.sleep ?? defaultSleep;
   const maxAttempts = deps.maxPollAttempts ?? SCAN_POLL_MAX_ATTEMPTS;
 
@@ -170,7 +176,7 @@ export async function runManualScan(deps: Tier2Deps, url: string): Promise<Manua
     signal: deps.signal,
   });
 
-  let queued = await startScan(scanDepsFor(token.token), url);
+  let queued = await startScan(scanDepsFor(token.token), url, forceFresh);
 
   if (
     queued.kind === "refused" &&
@@ -185,9 +191,12 @@ export async function runManualScan(deps: Tier2Deps, url: string): Promise<Manua
       return { kind: "unavailable", reason: fresh.reason };
     }
     token = fresh;
-    queued = await startScan(scanDepsFor(token.token), url);
+    queued = await startScan(scanDepsFor(token.token), url, forceFresh);
   }
 
+  if (queued.kind === "cached") {
+    return { kind: "cached", cached: queued.cached };
+  }
   if (queued.kind === "quota_exceeded") {
     return {
       kind: "quota_exceeded",

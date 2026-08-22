@@ -230,7 +230,7 @@ function startScan(url: string | null): void {
     running = true;
     apply({ kind: "scanning", url });
 
-    void runManualScan({ baseUrl: API_BASE_URL }, url)
+    void runManualScan({ baseUrl: API_BASE_URL }, url, true)
       .then((outcome) => {
         apply({ kind: "result", url, outcome });
       })

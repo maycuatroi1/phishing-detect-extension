@@ -376,6 +376,13 @@ paths:
 
         The scan is queued and answered immediately with 202. Poll GET /v1/scan/{scan_id} after
         poll_after_seconds for the verdict.
+
+
+        A host that already carries a fresh model verdict is answered 200 with that verdict
+        instead, without queueing anything and without spending quota. The client asks about a
+        host, not about one document, so an answer another install token already paid for answers
+        the same question. The 200 body carries no scan_id, site_id or evidence_id, because those
+        belong to whoever paid for the scan and nothing in the client needs them.
       security:
         - installToken: []
       requestBody:
@@ -390,6 +397,33 @@ paths:
                 value:
                   url: https://login.example.test/account/verify
       responses:
+        "200":
+          description: >-
+            A fresh verdict for this host was already on record, so it is returned as is. No scan
+            row was created, no worker was started and no quota was spent.
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/NoSniff"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanCached"
+              examples:
+                cached:
+                  summary: Answered from the corpus, quota untouched.
+                  value:
+                    status: cached
+                    is_scam: true
+                    confidence: 0.5
+                    confidence_basis: uncalibrated_single_vote
+                    source: llm
+                    host: mamibet88.cc
+                    checked_at: "2026-08-22T13:50:33Z"
+                    cache_age_seconds: 3600
+                    cache_ttl_seconds: 604800
+                    quota_remaining: 500
         "202":
           description: The scan is queued.
           headers:
@@ -1190,9 +1224,10 @@ components:
       additionalProperties: false
       required: [url]
       description: >-
-        Exactly one field. Adding any field that could reach the model input turns this endpoint
-        into a free LLM proxy, so the server refuses the whole request rather than dropping the
-        extra field.
+        One required field and one optional flag. Adding any field that could reach the model input
+        turns this endpoint into a free LLM proxy, so the server refuses the whole request rather
+        than dropping the extra field. fresh is safe to accept because it decides only whether a
+        verdict already on record may answer; it never reaches the capture or the prompt.
       properties:
         url:
           type: string
@@ -1202,6 +1237,14 @@ components:
           description: >-
             An absolute http or https URL carrying a host and no userinfo. Credentials embedded in
             a URL are refused so they never reach the corpus, a server side fetch or a prompt.
+        fresh:
+          type: boolean
+          default: false
+          description: >-
+            Ask for a scan even when this host already has a verdict on record. A user who clicked
+            a scan button on one page wants that page looked at now, so the client sets this; an
+            automatic scan of an unknown host leaves it unset and takes the cached answer. Setting
+            it spends quota.
 
     ScanQueued:
       type: object
@@ -1222,6 +1265,53 @@ components:
           type: integer
           minimum: 0
           description: Scans left on this install token inside the current window.
+
+    ScanCached:
+      type: object
+      additionalProperties: false
+      required:
+        [status, is_scam, confidence, confidence_basis, source, host, checked_at,
+         cache_age_seconds, cache_ttl_seconds, quota_remaining]
+      description: >-
+        A verdict already on record for this host. Deliberately not a VerdictEnvelope: it carries
+        no scan_id, site_id or evidence_id, because the scan it came from may belong to a
+        different install token and none of those ids are the client's to hold.
+      properties:
+        status:
+          type: string
+          const: cached
+        is_scam:
+          type: boolean
+          description: The model verdict. Never null here, an undecided scan is never cached.
+        confidence:
+          type: number
+          description: >-
+            Uncalibrated. Every decided model verdict carries the same number, so it orders
+            nothing and must not be shown as a probability.
+        confidence_basis:
+          type: string
+          const: uncalibrated_single_vote
+        source:
+          type: string
+          const: llm
+        host:
+          type: string
+          description: The host the answer is about. The path of the URL asked about is not echoed.
+        checked_at:
+          type: string
+          format: date-time
+          description: When the scan that produced this verdict finished.
+        cache_age_seconds:
+          type: integer
+          minimum: 0
+        cache_ttl_seconds:
+          type: integer
+          minimum: 0
+          description: How old a verdict may be and still answer. Past this the host is scanned again.
+        quota_remaining:
+          type: integer
+          minimum: 0
+          description: Unchanged by this call. It is reported so the client can show one number.
 
     ReportRequest:
       type: object

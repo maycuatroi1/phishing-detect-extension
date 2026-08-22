@@ -32,13 +32,36 @@ describe("popup nói được vì sao nó tự quét trang này", () => {
     expect(view.detail).toContain("còn 5 lượt");
   });
 
-  it("trang dưới ngưỡng thì nói thẳng là dưới ngưỡng và nói cả trần mỗi ngày", () => {
+  it("trang điểm thấp cũng được nói thẳng là sẽ quét, và điểm 0 không được đọc thành an toàn", () => {
     const view = autoScanPanelView({ kind: "ready", enabled: true, risk: LOW, entry: null, budgetLeft: 6 });
 
-    expect(view.headline).toContain("dưới ngưỡng");
-    expect(view.detail).toContain(String(AUTO_SCAN_DAILY_CAP));
+    expect(view.headline).toContain("sẽ được tự quét");
+    expect(view.detail).toContain("không nghĩa là trang an toàn");
+    expect(view.detail).toContain("còn 6 lượt");
     expect(view.reasons).toEqual([]);
     expect(view.buttonLabel).toBe(AUTO_SCAN_OFF_LABEL);
+  });
+
+  it("không một dòng chữ nào trong panel còn nói tới ngưỡng rủi ro", () => {
+    const views = [
+      autoScanPanelView({ kind: "unsupported" }),
+      autoScanPanelView({ kind: "saving", turningOff: true }),
+      autoScanPanelView({ kind: "ready", enabled: true, risk: LOW, entry: null, budgetLeft: 6 }),
+      autoScanPanelView({ kind: "ready", enabled: false, risk: LOW, entry: null, budgetLeft: 6 }),
+      autoScanPanelView({ kind: "ready", enabled: true, risk: HIGH, entry: null, budgetLeft: 6 }),
+      autoScanPanelView({ kind: "ready", enabled: true, risk: GATED, entry: null, budgetLeft: 6 }),
+    ];
+
+    for (const view of views) {
+      expect(`${view.headline} ${view.detail}`, view.headline).not.toContain("ngưỡng");
+    }
+  });
+
+  it("nói ra rằng một host đã có kết quả thì không tốn lượt nào", () => {
+    const view = autoScanPanelView({ kind: "unsupported" });
+
+    expect(view.detail).toContain("không tiêu lượt nào");
+    expect(view.detail).toContain(String(AUTO_SCAN_DAILY_CAP));
   });
 
   it("trang được miễn thì nêu lý do miễn chứ không để trống", () => {

@@ -1,27 +1,28 @@
 import {
   dayKeyOf,
   pruneAutoScanDaysBefore,
-  readAutoScanDay,
+  readAutoScanMemory,
   readAutoScanEnabled,
   reserveAutoScanSlot,
   settleAutoScanSlot,
   type AutoScanDay,
 } from "./auto-scan-store.ts";
-import { isHighRisk, scoreHost, type HostRisk } from "./risk.ts";
+import { scoreHost, type HostRisk } from "./risk.ts";
 import { isScannableUrl } from "./scan.ts";
 import { runManualScan, type ManualScanOutcome, type Tier2Deps } from "./tier2.ts";
 
-export const PRODUCTION_SCAN_QUOTA_PER_DAY = 20;
+export const PRODUCTION_SCAN_QUOTA_PER_DAY = 500;
 
-export const AUTO_SCAN_DAILY_CAP = 6;
+export const AUTO_SCAN_DAILY_CAP = 300;
+
+export const AUTO_SCAN_MEMORY_DAYS = 7;
 
 export const AUTO_SCAN_SKIP_REASONS = [
   "disabled",
   "not_scannable",
   "host_exempt",
   "verdict_known",
-  "below_threshold",
-  "already_scanned_today",
+  "already_scanned_recently",
   "budget_spent",
 ] as const;
 
@@ -36,6 +37,7 @@ export interface AutoScanContext {
   readonly enabled: boolean;
   readonly risk: HostRisk;
   readonly day: AutoScanDay;
+  readonly memory: readonly AutoScanDay[];
 }
 
 export type AutoScanDecision =
@@ -49,6 +51,7 @@ export type AutoScanOutcome =
       readonly risk: HostRisk;
       readonly outcome: ManualScanOutcome;
       readonly isScam: boolean | null;
+      readonly fromCache: boolean;
     };
 
 export interface AutoScanDeps extends Tier2Deps {
@@ -65,8 +68,11 @@ export function budgetLeftOf(day: AutoScanDay): number {
   return Math.max(AUTO_SCAN_DAILY_CAP - day.entries.length, 0);
 }
 
-export function alreadyScannedToday(day: AutoScanDay, host: string): boolean {
-  return day.entries.some((entry) => entry.host === host);
+export function alreadyScannedRecently(
+  memory: readonly AutoScanDay[],
+  host: string,
+): boolean {
+  return memory.some((day) => day.entries.some((entry) => entry.host === host));
 }
 
 export function decideAutoScan(context: AutoScanContext): AutoScanDecision {
@@ -88,11 +94,8 @@ export function decideAutoScan(context: AutoScanContext): AutoScanDecision {
   ) {
     return { kind: "skip", reason: "verdict_known", risk };
   }
-  if (!isHighRisk(risk)) {
-    return { kind: "skip", reason: "below_threshold", risk };
-  }
-  if (alreadyScannedToday(context.day, context.host)) {
-    return { kind: "skip", reason: "already_scanned_today", risk };
+  if (alreadyScannedRecently(context.memory, context.host)) {
+    return { kind: "skip", reason: "already_scanned_recently", risk };
   }
   const budgetLeft = budgetLeftOf(context.day);
   if (budgetLeft <= 0) {
@@ -103,6 +106,9 @@ export function decideAutoScan(context: AutoScanContext): AutoScanDecision {
 }
 
 export function verdictIsScam(outcome: ManualScanOutcome): boolean | null {
+  if (outcome.kind === "cached") {
+    return outcome.cached.isScam;
+  }
   if (outcome.kind !== "verdict") {
     return null;
   }
@@ -127,13 +133,16 @@ async function gatedRun(
   const risk = scoreHost(input.host);
   const day = dayKeyOf(now());
 
+  const memory = await readAutoScanMemory(day, AUTO_SCAN_MEMORY_DAYS);
+
   const context: AutoScanContext = {
     url: input.url,
     host: risk.host,
     verdict: input.verdict,
     enabled: await readAutoScanEnabled(),
     risk,
-    day: await readAutoScanDay(day),
+    day: memory[0] ?? { day, entries: [] },
+    memory,
   };
 
   const decision = decideAutoScan(context);
@@ -147,13 +156,13 @@ async function gatedRun(
     score: risk.score,
     isScam: null,
   });
-  await pruneAutoScanDaysBefore(day);
+  await pruneAutoScanDaysBefore(day, AUTO_SCAN_MEMORY_DAYS);
 
   const outcome = await runManualScan(deps, input.url);
   const isScam = verdictIsScam(outcome);
   await settleAutoScanSlot(day, context.host, isScam);
 
-  return { kind: "scanned", risk, outcome, isScam };
+  return { kind: "scanned", risk, outcome, isScam, fromCache: outcome.kind === "cached" };
 }
 
 export function runGatedAutoScan(

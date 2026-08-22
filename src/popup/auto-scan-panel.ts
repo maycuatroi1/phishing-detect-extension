@@ -1,6 +1,6 @@
-import { AUTO_SCAN_DAILY_CAP } from "../lib/auto-scan.ts";
+import { AUTO_SCAN_DAILY_CAP, AUTO_SCAN_MEMORY_DAYS } from "../lib/auto-scan.ts";
 import type { AutoScanEntry } from "../lib/auto-scan-store.ts";
-import { RISK_THRESHOLD, isHighRisk, type HostRisk } from "../lib/risk.ts";
+import type { HostRisk } from "../lib/risk.ts";
 import { formatInstant } from "./scan-panel.ts";
 
 export const AUTO_SCAN_OFF_LABEL = "Tắt tự quét trang lạ";
@@ -9,10 +9,13 @@ export const AUTO_SCAN_ON_LABEL = "Bật lại tự quét trang lạ";
 
 export const AUTO_SCAN_SAVING_LABEL = "Đang lưu...";
 
-export const AUTO_SCAN_COST_NOTE = `Mỗi lượt tự quét gửi URL đầy đủ của tab lên server và tiêu một lượt trong hạn mức, nên extension chỉ tự quét tối đa ${AUTO_SCAN_DAILY_CAP} trang một ngày và không bao giờ quét lại cùng một trang trong ngày đó.`;
+export const AUTO_SCAN_COST_NOTE = `Mỗi lượt tự quét gửi URL đầy đủ của tab lên server. Nếu host đó đã có kết quả trong kho thì server trả lại kết quả cũ và không tiêu lượt nào; chỉ host thật sự mới mới tốn một lượt. Trần là ${AUTO_SCAN_DAILY_CAP} host một ngày, và một host đã quét thì ${AUTO_SCAN_MEMORY_DAYS} ngày sau mới hỏi lại.`;
 
 export const AUTO_SCAN_LOCAL_NOTE =
-  "Điểm rủi ro tính hoàn toàn trong máy bạn, chỉ từ tên miền, và không có byte nào của phép tính đó rời khỏi máy.";
+  "Điểm rủi ro tính hoàn toàn trong máy bạn, chỉ từ tên miền, và không có byte nào của phép tính đó rời khỏi máy. Nó không còn quyết định có quét hay không, chỉ nói cho bạn biết tên miền này trông thế nào.";
+
+export const AUTO_SCAN_NO_GATE_NOTE =
+  "Host lạ nào cũng được đẩy lên quét, kể cả host không có một tín hiệu rủi ro nào trong tên miền. Điểm 0 nghĩa là tên miền trông bình thường, không nghĩa là trang an toàn.";
 
 export type AutoScanModel =
   | { readonly kind: "unsupported" }
@@ -51,7 +54,7 @@ function scannedView(risk: HostRisk, entry: AutoScanEntry, budgetLeft: number): 
 
   return {
     headline: "Extension đã tự quét trang này",
-    detail: `Tự quét lúc ${when} vì tên miền đạt ${entry.score} điểm rủi ro, từ ngưỡng ${RISK_THRESHOLD} trở lên là quét. ${verdict} Hôm nay còn ${budgetLeft} lượt tự quét.`,
+    detail: `Tự quét lúc ${when} vì host này chưa có trong dữ liệu. Tên miền đạt ${entry.score} điểm rủi ro, con số đó chỉ để bạn đọc chứ không quyết định có quét hay không. ${verdict} Hôm nay còn ${budgetLeft} lượt tự quét.`,
     reasons: reasonsOf(risk),
     buttonLabel: AUTO_SCAN_OFF_LABEL,
     buttonEnabled: true,
@@ -66,7 +69,7 @@ function readyView(model: Extract<AutoScanModel, { kind: "ready" }>): AutoScanPa
   if (!model.enabled) {
     return {
       headline: "Tự quét trang lạ đang tắt",
-      detail: `Không lượt tự quét nào chạy khi công tắc này tắt, kể cả với trang điểm rủi ro cao. Tên miền này đang ${model.risk.score} điểm, ngưỡng là ${RISK_THRESHOLD}. Nút Quét sâu vẫn bấm tay được.`,
+      detail: `Không lượt tự quét nào chạy khi công tắc này tắt, kể cả với host chưa có trong dữ liệu. Tên miền này đang ${model.risk.score} điểm rủi ro. Nút Quét sâu vẫn bấm tay được.`,
       reasons: reasonsOf(model.risk),
       buttonLabel: AUTO_SCAN_ON_LABEL,
       buttonEnabled: true,
@@ -83,19 +86,9 @@ function readyView(model: Extract<AutoScanModel, { kind: "ready" }>): AutoScanPa
     };
   }
 
-  if (isHighRisk(model.risk)) {
-    return {
-      headline: "Tên miền này đủ điểm để tự quét",
-      detail: `Tên miền đạt ${model.risk.score} điểm rủi ro, ngưỡng là ${RISK_THRESHOLD}. Hôm nay còn ${model.budgetLeft} lượt tự quét. ${AUTO_SCAN_LOCAL_NOTE}`,
-      reasons: reasonsOf(model.risk),
-      buttonLabel: AUTO_SCAN_OFF_LABEL,
-      buttonEnabled: true,
-    };
-  }
-
   return {
-    headline: "Tên miền này dưới ngưỡng tự quét",
-    detail: `Tên miền chỉ đạt ${model.risk.score} điểm rủi ro, dưới ngưỡng ${RISK_THRESHOLD}, nên extension không tự quét nó. ${AUTO_SCAN_COST_NOTE}`,
+    headline: "Host này sẽ được tự quét",
+    detail: `Host chưa có trong dữ liệu nên extension đẩy lên quét. Tên miền đạt ${model.risk.score} điểm rủi ro. ${AUTO_SCAN_NO_GATE_NOTE} Hôm nay còn ${model.budgetLeft} lượt. ${AUTO_SCAN_LOCAL_NOTE}`,
     reasons: reasonsOf(model.risk),
     buttonLabel: AUTO_SCAN_OFF_LABEL,
     buttonEnabled: true,

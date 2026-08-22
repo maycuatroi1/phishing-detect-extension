@@ -16,7 +16,7 @@ export const AUTO_SCAN_WARNING_LOOK: BadgeLook = {
   state: "soft",
   text: NG_TEXT,
   color: SOFT_COLOR,
-  title: `Anti-Fraud: NG màu hổ phách. Trang này chưa có trong danh sách nào, nhưng điểm rủi ro của tên miền đủ cao nên extension đã tự quét sâu, và model nói đây là trang lừa đảo. ${MACHINE_UNVERIFIED_TEXT} Mở popup để xem những tín hiệu nào đã kích hoạt. ${SOFT_REPORT_HINT} ${DISMISS_HINT}`,
+  title: `Anti-Fraud: NG màu hổ phách. Trang này chưa có trong danh sách nào, nên extension đã tự đẩy lên server quét sâu, và model nói đây là trang lừa đảo. ${MACHINE_UNVERIFIED_TEXT} Mở popup để xem những tín hiệu nào đã kích hoạt. ${SOFT_REPORT_HINT} ${DISMISS_HINT}`,
 };
 
 export function knownVerdictOf(verdict: string): KnownVerdict {

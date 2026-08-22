@@ -11,14 +11,17 @@ import { evaluateTabWithAutoScan } from "../../src/background/auto-scan.ts";
 import { runManualScan } from "../../src/lib/tier2.ts";
 import {
   AUTO_SCAN_DAILY_CAP,
+  AUTO_SCAN_MEMORY_DAYS,
   PRODUCTION_SCAN_QUOTA_PER_DAY,
   budgetLeftOf,
+  decideAutoScan,
   resetAutoScanGate,
   runGatedAutoScan,
 } from "../../src/lib/auto-scan.ts";
 import {
   clearAutoScanStore,
   dayKeyOf,
+  dayKeysBack,
   readAutoScanDay,
   writeAutoScanEnabled,
 } from "../../src/lib/auto-scan-store.ts";
@@ -27,7 +30,7 @@ import { NG_TEXT, badgeLookFor } from "../../src/background/tier0.ts";
 import { entriesFor } from "../helpers/fixture.ts";
 import { encodeAfbl } from "../../src/lib/afbl.ts";
 import { manualClock } from "../helpers/clock.ts";
-import { pathOf, type WireTap } from "../helpers/wire.ts";
+import { type WireTap } from "../helpers/wire.ts";
 import { directImportsOf, reachableFrom, readSource, sourceFiles } from "../helpers/imports.ts";
 import {
   countInstallRequests,
@@ -50,6 +53,8 @@ const TIER2_MODULES = ["lib/tier2.ts", "lib/scan.ts", "lib/install.ts", "lib/tok
 const HOST_HIGH_RISK = "mamibet88.cc";
 
 const HOST_LOW_RISK = "benhvien199.vn";
+
+const HOST_NO_SIGNAL = "www.omelet.tech";
 
 const HOST_LEGIT_IN_ARTIFACT = "xoso-mien-bac.vn";
 
@@ -176,16 +181,42 @@ describe("tự quét chỉ chạy sau khi qua cổng lọc", () => {
     expect(day.entries[0].isScam).toBe(true);
   });
 
-  it("host dưới ngưỡng rủi ro thì tuyệt đối không tự quét", async () => {
+  it("host lạ không một tín hiệu rủi ro nào vẫn được tự quét, vì chưa có dữ liệu không phải là an toàn", async () => {
+    expect(scoreHost(HOST_NO_SIGNAL).score).toBe(0);
+    expect(isHighRisk(scoreHost(HOST_NO_SIGNAL))).toBe(false);
+    expect(scoreHost(HOST_NO_SIGNAL).exempt).toBe(false);
+
+    await browse([HOST_NO_SIGNAL]);
+
+    expect(tap.requests.filter(isScanPost)).toHaveLength(1);
+    expect(countInstallRequests(tap.requests)).toBe(1);
+  });
+
+  it("host dưới ngưỡng rủi ro cũng được quét, điểm rủi ro không còn là cổng chặn", async () => {
     expect(RISK_THRESHOLD).toBe(4);
     expect(scoreHost(HOST_LOW_RISK).score).toBe(3);
     expect(isHighRisk(scoreHost(HOST_LOW_RISK))).toBe(false);
 
     await browse([HOST_LOW_RISK]);
 
-    expect(countScanRequests(tap.requests)).toBe(0);
-    expect(countInstallRequests(tap.requests)).toBe(0);
-    expect(tap.requests.every((request) => pathOf(request) === "/v1/lookup")).toBe(true);
+    expect(tap.requests.filter(isScanPost)).toHaveLength(1);
+  });
+
+  it("không lý do bỏ qua nào còn nhắc tới ngưỡng rủi ro", () => {
+    const day = { day: "2026-08-23", entries: [] as const };
+    const decision = decideAutoScan({
+      url: `https://${HOST_NO_SIGNAL}/`,
+      host: HOST_NO_SIGNAL,
+      verdict: "unknown",
+      enabled: true,
+      risk: scoreHost(HOST_NO_SIGNAL),
+      day,
+      memory: [day],
+    });
+
+    expect(decision.kind).toBe("scan");
+    expect(readSource("lib/auto-scan.ts")).not.toContain("below_threshold");
+    expect(readSource("lib/auto-scan.ts")).not.toContain("isHighRisk");
   });
 
   it("host có verdict legit trong artifact thì không tự quét, kể cả khi điểm rủi ro vượt ngưỡng", async () => {
@@ -212,22 +243,45 @@ describe("tự quét chỉ chạy sau khi qua cổng lọc", () => {
     expect(countScanRequests(tap.requests)).toBe(0);
   });
 
-  it("trần tự quét mỗi ngày là 6 lượt và mười hai trang lạ điểm cao chỉ tiêu đúng 6", async () => {
-    expect(AUTO_SCAN_DAILY_CAP).toBe(6);
-    expect(PRODUCTION_SCAN_QUOTA_PER_DAY).toBe(20);
-    expect(PRODUCTION_SCAN_QUOTA_PER_DAY - AUTO_SCAN_DAILY_CAP).toBe(14);
+  it("mười hai trang lạ trong một phiên duyệt nay tiêu đúng mười hai lượt, không còn bị cổng lọc chặn", async () => {
     expect(TWELVE_HIGH_RISK_HOSTS).toHaveLength(12);
-    for (const host of TWELVE_HIGH_RISK_HOSTS) {
-      expect(isHighRisk(scoreHost(host)), `${host} phải vượt ngưỡng thì bài này mới có nghĩa`).toBe(true);
-    }
 
     await browse(TWELVE_HIGH_RISK_HOSTS);
 
-    expect(tap.requests.filter(isScanPost)).toHaveLength(6);
+    expect(tap.requests.filter(isScanPost)).toHaveLength(12);
 
     const day = await readAutoScanDay(dayKeyOf(Date.now()));
-    expect(day.entries).toHaveLength(6);
-    expect(budgetLeftOf(day)).toBe(0);
+    expect(day.entries).toHaveLength(12);
+    expect(budgetLeftOf(day)).toBe(AUTO_SCAN_DAILY_CAP - 12);
+  });
+
+  it("trần vẫn còn đó và vẫn chừa chỗ cho lượt bấm tay trong hạn mức server", () => {
+    expect(AUTO_SCAN_DAILY_CAP).toBe(300);
+    expect(PRODUCTION_SCAN_QUOTA_PER_DAY).toBe(500);
+    expect(PRODUCTION_SCAN_QUOTA_PER_DAY - AUTO_SCAN_DAILY_CAP).toBe(200);
+
+    const full = {
+      day: "2026-08-23",
+      entries: Array.from({ length: AUTO_SCAN_DAILY_CAP }, (_unused, index) => ({
+        host: `da-quet-${index}.test`,
+        scannedAt: 1_800_000_000_000,
+        score: 0,
+        isScam: false,
+      })),
+    };
+
+    expect(budgetLeftOf(full)).toBe(0);
+    expect(
+      decideAutoScan({
+        url: `https://${HOST_NO_SIGNAL}/`,
+        host: HOST_NO_SIGNAL,
+        verdict: "unknown",
+        enabled: true,
+        risk: scoreHost(HOST_NO_SIGNAL),
+        day: full,
+        memory: [full],
+      }),
+    ).toEqual({ kind: "skip", reason: "budget_spent", risk: scoreHost(HOST_NO_SIGNAL) });
   });
 
   it("người dùng tắt tự quét thì mười hai trang lạ điểm cao không chạy lượt nào", async () => {
@@ -251,29 +305,84 @@ describe("tự quét chỉ chạy sau khi qua cổng lọc", () => {
 
     const day = await readAutoScanDay(dayKeyOf(Date.now()));
     expect(day.entries).toHaveLength(1);
-    expect(budgetLeftOf(day)).toBe(5);
+    expect(budgetLeftOf(day)).toBe(AUTO_SCAN_DAILY_CAP - 1);
   });
 
-  it("ngân sách mở lại theo ngày chứ không phải theo phiên", async () => {
+  it("ngân sách mở lại theo ngày, nhưng trí nhớ về host đã quét thì sống qua mốc nửa đêm", async () => {
     const firstDay = 1_800_000_000_000;
     const nextDay = firstDay + 86_400_000;
+    const depsAt = (at: number) => ({
+      baseUrl: DEFAULT_API_BASE_URL,
+      fetchImpl: tap.fetchImpl,
+      sleep: sleepSpy().sleep,
+      now: () => at,
+    });
 
-    for (const host of TWELVE_HIGH_RISK_HOSTS) {
-      await runGatedAutoScan(
-        { baseUrl: DEFAULT_API_BASE_URL, fetchImpl: tap.fetchImpl, sleep: sleepSpy().sleep, now: () => firstDay },
-        { url: urlOf(host), host, verdict: "unknown" },
-      );
-    }
-    expect(tap.requests.filter(isScanPost)).toHaveLength(6);
+    await runGatedAutoScan(depsAt(firstDay), {
+      url: urlOf(HOST_HIGH_RISK),
+      host: HOST_HIGH_RISK,
+      verdict: "unknown",
+    });
+    expect(tap.requests.filter(isScanPost)).toHaveLength(1);
 
-    await runGatedAutoScan(
-      { baseUrl: DEFAULT_API_BASE_URL, fetchImpl: tap.fetchImpl, sleep: sleepSpy().sleep, now: () => nextDay },
-      { url: urlOf(HOST_HIGH_RISK), host: HOST_HIGH_RISK, verdict: "unknown" },
-    );
+    const again = await runGatedAutoScan(depsAt(nextDay), {
+      url: urlOf(HOST_HIGH_RISK),
+      host: HOST_HIGH_RISK,
+      verdict: "unknown",
+    });
 
-    expect(tap.requests.filter(isScanPost)).toHaveLength(7);
-    expect((await readAutoScanDay(dayKeyOf(nextDay))).entries).toHaveLength(1);
-    expect((await readAutoScanDay(dayKeyOf(firstDay))).entries).toEqual([]);
+    expect(again).toEqual({
+      kind: "skipped",
+      reason: "already_scanned_recently",
+      risk: scoreHost(HOST_HIGH_RISK),
+    });
+    expect(tap.requests.filter(isScanPost)).toHaveLength(1);
+
+    const other = await runGatedAutoScan(depsAt(nextDay), {
+      url: urlOf(TWELVE_HIGH_RISK_HOSTS[0]),
+      host: TWELVE_HIGH_RISK_HOSTS[0],
+      verdict: "unknown",
+    });
+
+    expect(other.kind).toBe("scanned");
+    expect(tap.requests.filter(isScanPost)).toHaveLength(2);
+    expect(budgetLeftOf(await readAutoScanDay(dayKeyOf(nextDay)))).toBe(AUTO_SCAN_DAILY_CAP - 1);
+  });
+
+  it("trí nhớ trải đúng bảy ngày, và ngày thứ tám thì host được quét lại", async () => {
+    expect(AUTO_SCAN_MEMORY_DAYS).toBe(7);
+    expect(dayKeysBack("2026-08-23", AUTO_SCAN_MEMORY_DAYS)).toEqual([
+      "2026-08-23",
+      "2026-08-22",
+      "2026-08-21",
+      "2026-08-20",
+      "2026-08-19",
+      "2026-08-18",
+      "2026-08-17",
+    ]);
+
+    const firstDay = 1_800_000_000_000;
+    const eighthDay = firstDay + 8 * 86_400_000;
+    const depsAt = (at: number) => ({
+      baseUrl: DEFAULT_API_BASE_URL,
+      fetchImpl: tap.fetchImpl,
+      sleep: sleepSpy().sleep,
+      now: () => at,
+    });
+
+    await runGatedAutoScan(depsAt(firstDay), {
+      url: urlOf(HOST_HIGH_RISK),
+      host: HOST_HIGH_RISK,
+      verdict: "unknown",
+    });
+    const later = await runGatedAutoScan(depsAt(eighthDay), {
+      url: urlOf(HOST_HIGH_RISK),
+      host: HOST_HIGH_RISK,
+      verdict: "unknown",
+    });
+
+    expect(later.kind).toBe("scanned");
+    expect(tap.requests.filter(isScanPost)).toHaveLength(2);
   });
 
   it("giữ chỗ trong sổ ngân sách trước khi gửi request, chứ không phải sau khi có kết quả", async () => {

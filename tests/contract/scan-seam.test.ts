@@ -13,12 +13,15 @@ import {
 import {
   CONFIDENCE_BASES,
   PARSE_FAILURE_REASONS,
+  SCAN_CACHED_STATUS,
   SCAN_PATH,
   SCAN_REQUEST_FIELDS,
   SCAN_STATUSES,
+  SCAN_URL_FIELD,
   SCAN_URL_MAX_LENGTH,
   VERDICT_ENVELOPE_FIELDS,
   VERDICT_SOURCES,
+  parseScanCached,
   parseScanQueued,
   parseVerdictEnvelope,
   scanRequestBody,
@@ -60,15 +63,53 @@ describe("client tier 2 nói đúng thứ tiếng mà openapi vendor mô tả", 
     expect(scheme.scheme).toBe("bearer");
   });
 
-  it("thân POST /v1/scan chỉ được mang đúng một trường url", () => {
+  it("thân POST /v1/scan chỉ được mang url và cờ fresh, không gì khác", () => {
     const schema = document.components.schemas.ScanRequest;
     expect(schema.additionalProperties).toBe(false);
-    expect(schema.required).toEqual(SCAN_REQUEST_FIELDS);
+    expect(schema.required).toEqual([SCAN_URL_FIELD]);
     expect(Object.keys(schema.properties)).toEqual(SCAN_REQUEST_FIELDS);
     expect(schema.properties.url.maxLength).toBe(SCAN_URL_MAX_LENGTH);
-    expect(Object.keys(JSON.parse(scanRequestBody("https://example.com/")))).toEqual(
+    expect(schema.properties.fresh.type).toBe("boolean");
+    expect(schema.properties.fresh.default).toBe(false);
+  });
+
+  it("lượt tự quét không đặt fresh, cú bấm tay thì có, và không thân nào mang trường thứ ba", () => {
+    expect(Object.keys(JSON.parse(scanRequestBody("https://example.com/")))).toEqual([
+      SCAN_URL_FIELD,
+    ]);
+    expect(Object.keys(JSON.parse(scanRequestBody("https://example.com/", true)))).toEqual(
       SCAN_REQUEST_FIELDS,
     );
+    expect(JSON.parse(scanRequestBody("https://example.com/", true)).fresh).toBe(true);
+  });
+
+  it("200 là câu trả lời từ kho, và nó cố tình không mang một id nào của lượt quét cũ", () => {
+    const schema = document.components.schemas.ScanCached;
+    expect(schema.properties.status.const).toBe(SCAN_CACHED_STATUS);
+    expect(schema.additionalProperties).toBe(false);
+
+    for (const forbidden of ["scan_id", "site_id", "evidence_id"]) {
+      expect(Object.keys(schema.properties), `${forbidden} lọt vào thân 200`).not.toContain(
+        forbidden,
+      );
+    }
+
+    const example = scanPost.responses["200"].content["application/json"].examples.cached.value;
+    const parsed = parseScanCached(example);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.isScam).toBe(example.is_scam);
+    expect(parsed?.host).toBe(example.host);
+    expect(parsed?.quotaRemaining).toBe(example.quota_remaining);
+  });
+
+  it("một thân 200 thiếu trường hay sai kiểu thì client trả null chứ không đoán", () => {
+    const example = scanPost.responses["200"].content["application/json"].examples.cached.value;
+
+    expect(parseScanCached({ ...example, status: "queued" })).toBeNull();
+    expect(parseScanCached({ ...example, is_scam: "true" })).toBeNull();
+    expect(parseScanCached({ ...example, host: "" })).toBeNull();
+    expect(parseScanCached({ ...example, quota_remaining: -1 })).toBeNull();
+    expect(parseScanCached({ ...example, cache_age_seconds: 1.5 })).toBeNull();
   });
 
   it("spec nói thẳng vì sao một trường thừa là 400 chứ không phải cảnh báo", () => {

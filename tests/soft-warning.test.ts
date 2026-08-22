@@ -564,6 +564,7 @@ describe("host đã mang cờ mềm thì cổng tự quét không tiêu thêm m�
       enabled: true,
       risk: scoreHost("nhacai-mot.top"),
       day,
+      memory: [day],
     };
   }
 

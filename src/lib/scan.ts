@@ -10,7 +10,11 @@ export const SCAN_PATH = "/v1/scan";
 
 export const SCAN_URL_FIELD = "url";
 
-export const SCAN_REQUEST_FIELDS: readonly string[] = [SCAN_URL_FIELD];
+export const SCAN_FRESH_FIELD = "fresh";
+
+export const SCAN_REQUEST_FIELDS: readonly string[] = [SCAN_URL_FIELD, SCAN_FRESH_FIELD];
+
+export const SCAN_CACHED_STATUS = "cached";
 
 export const SCAN_URL_MAX_LENGTH = 2048;
 
@@ -87,8 +91,17 @@ export interface ScanQueued {
   readonly quotaRemaining: number;
 }
 
+export interface ScanCached {
+  readonly isScam: boolean;
+  readonly host: string;
+  readonly checkedAt: string;
+  readonly cacheAgeSeconds: number;
+  readonly quotaRemaining: number;
+}
+
 export type StartScanOutcome =
   | { readonly kind: "queued"; readonly queued: ScanQueued }
+  | { readonly kind: "cached"; readonly cached: ScanCached }
   | { readonly kind: "quota_exceeded"; readonly error: ApiError }
   | { readonly kind: "refused"; readonly error: ApiError }
   | { readonly kind: "unavailable"; readonly reason: string };
@@ -105,8 +118,10 @@ export interface ScanDeps {
   readonly signal?: AbortSignal;
 }
 
-export function scanRequestBody(url: string): string {
-  return JSON.stringify({ [SCAN_URL_FIELD]: url });
+export function scanRequestBody(url: string, fresh = false): string {
+  return fresh
+    ? JSON.stringify({ [SCAN_URL_FIELD]: url, [SCAN_FRESH_FIELD]: true })
+    : JSON.stringify({ [SCAN_URL_FIELD]: url });
 }
 
 export function verdictPath(scanId: string): string {
@@ -156,6 +171,40 @@ export function parseScanQueued(body: unknown): ScanQueued | null {
     return null;
   }
   return { scanId: record.scan_id, pollAfterSeconds: poll, quotaRemaining: quota };
+}
+
+export function parseScanCached(body: unknown): ScanCached | null {
+  if (typeof body !== "object" || body === null) {
+    return null;
+  }
+  const record = body as Record<string, unknown>;
+  if (record.status !== SCAN_CACHED_STATUS) {
+    return null;
+  }
+  if (typeof record.is_scam !== "boolean") {
+    return null;
+  }
+  if (typeof record.host !== "string" || record.host.length === 0) {
+    return null;
+  }
+  if (typeof record.checked_at !== "string" || record.checked_at.length === 0) {
+    return null;
+  }
+  const age = record.cache_age_seconds;
+  const quota = record.quota_remaining;
+  if (typeof age !== "number" || !Number.isInteger(age) || age < 0) {
+    return null;
+  }
+  if (typeof quota !== "number" || !Number.isInteger(quota) || quota < 0) {
+    return null;
+  }
+  return {
+    isScam: record.is_scam,
+    host: record.host,
+    checkedAt: record.checked_at,
+    cacheAgeSeconds: age,
+    quotaRemaining: quota,
+  };
 }
 
 function isNullableMember<T extends string>(
@@ -247,7 +296,11 @@ export function isTerminal(envelope: VerdictEnvelope): boolean {
   return TERMINAL_SCAN_STATUSES.includes(envelope.status);
 }
 
-export async function startScan(deps: ScanDeps, url: string): Promise<StartScanOutcome> {
+export async function startScan(
+  deps: ScanDeps,
+  url: string,
+  fresh = false,
+): Promise<StartScanOutcome> {
   if (!isScannableUrl(url)) {
     return { kind: "unavailable", reason: "URL của tab hiện tại không phải http/https quét được" };
   }
@@ -267,7 +320,7 @@ export async function startScan(deps: ScanDeps, url: string): Promise<StartScanO
         "content-type": JSON_MEDIA_TYPE,
         authorization: bearerHeaderValue(deps.token),
       },
-      body: scanRequestBody(url),
+      body: scanRequestBody(url, fresh),
       signal: deps.signal,
     });
   } catch (cause) {
@@ -297,6 +350,11 @@ export async function startScan(deps: ScanDeps, url: string): Promise<StartScanO
       };
     }
     return { kind: "refused", error };
+  }
+
+  const cached = parseScanCached(body);
+  if (cached !== null) {
+    return { kind: "cached", cached };
   }
 
   const queued = parseScanQueued(body);

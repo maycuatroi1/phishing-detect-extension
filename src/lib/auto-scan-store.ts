@@ -32,6 +32,18 @@ export function dayKeyOf(now: number): string {
   return new Date(now).toISOString().slice(0, 10);
 }
 
+export function dayKeysBack(day: string, days: number): string[] {
+  const anchor = Date.parse(`${day}T00:00:00.000Z`);
+  if (Number.isNaN(anchor) || days < 1) {
+    return [day];
+  }
+  const keys: string[] = [];
+  for (let back = 0; back < days; back += 1) {
+    keys.push(dayKeyOf(anchor - back * 86_400_000));
+  }
+  return keys;
+}
+
 function openAutoScanDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(AUTO_SCAN_DB_NAME, AUTO_SCAN_DB_VERSION);
@@ -149,12 +161,22 @@ export async function settleAutoScanSlot(
   await runTransaction(AUTO_SCAN_LEDGER_STORE, "readwrite", (store) => store.put(next));
 }
 
-export async function pruneAutoScanDaysBefore(day: string): Promise<void> {
+export async function readAutoScanMemory(day: string, days: number): Promise<AutoScanDay[]> {
+  const keys = dayKeysBack(day, days);
+  const found: AutoScanDay[] = [];
+  for (const key of keys) {
+    found.push(await readAutoScanDay(key));
+  }
+  return found;
+}
+
+export async function pruneAutoScanDaysBefore(day: string, days = 1): Promise<void> {
+  const keep = new Set(dayKeysBack(day, days));
   const keys = await runTransaction<IDBValidKey[]>(AUTO_SCAN_LEDGER_STORE, "readonly", (store) =>
     store.getAllKeys(),
   );
   for (const key of keys) {
-    if (typeof key === "string" && key !== day) {
+    if (typeof key === "string" && !keep.has(key)) {
       await runTransaction(AUTO_SCAN_LEDGER_STORE, "readwrite", (store) => store.delete(key));
     }
   }
