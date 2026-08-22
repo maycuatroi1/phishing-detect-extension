@@ -22,6 +22,20 @@ import {
   type ReportPanelView,
 } from "./report-panel.ts";
 import { warningPanelView, type WarningModel, type WarningPanelView } from "./warning-panel.ts";
+import {
+  autoScanPanelView,
+  type AutoScanModel,
+  type AutoScanPanelView,
+} from "./auto-scan-panel.ts";
+import { budgetLeftOf } from "../lib/auto-scan.ts";
+import {
+  dayKeyOf,
+  readAutoScanDay,
+  readAutoScanEnabled,
+  writeAutoScanEnabled,
+  type AutoScanEntry,
+} from "../lib/auto-scan-store.ts";
+import { scoreHost, type HostRisk } from "../lib/risk.ts";
 
 const REPORT_ACTIONS: Record<ReportClaim, string> = {
   phishing: "report-phishing",
@@ -36,6 +50,19 @@ function setSlot(name: string, value: string): void {
   const element = slot(name);
   if (element !== null) {
     element.textContent = value;
+  }
+}
+
+function setList(name: string, items: readonly string[]): void {
+  const element = slot(name);
+  if (element === null) {
+    return;
+  }
+  element.textContent = "";
+  for (const item of items) {
+    const line = document.createElement("li");
+    line.textContent = item;
+    element.append(line);
   }
 }
 
@@ -97,6 +124,82 @@ function applyReport(model: ReportModel): void {
 
 function applyWarning(model: WarningModel): void {
   renderWarning(warningPanelView(model));
+}
+
+function renderAutoScan(view: AutoScanPanelView): void {
+  setSlot("auto-scan-headline", view.headline);
+  setSlot("auto-scan-detail", view.detail);
+  setList("auto-scan-reasons", view.reasons);
+  dressButton("toggle-auto-scan", view.buttonLabel, view.buttonEnabled);
+}
+
+function applyAutoScan(model: AutoScanModel): void {
+  renderAutoScan(autoScanPanelView(model));
+}
+
+interface AutoScanState {
+  readonly enabled: boolean;
+  readonly entry: AutoScanEntry | null;
+  readonly budgetLeft: number;
+}
+
+async function currentAutoScanState(host: string): Promise<AutoScanState> {
+  const day = await readAutoScanDay(dayKeyOf(Date.now()));
+  return {
+    enabled: await readAutoScanEnabled(),
+    entry: day.entries.find((candidate) => candidate.host === host) ?? null,
+    budgetLeft: budgetLeftOf(day),
+  };
+}
+
+async function startAutoScan(url: string | null): Promise<void> {
+  const host = url === null ? null : hostOfUrl(url);
+  if (host === null) {
+    applyAutoScan({ kind: "unsupported" });
+    return;
+  }
+
+  const risk: HostRisk = scoreHost(host);
+
+  let state: AutoScanState;
+  try {
+    state = await currentAutoScanState(host);
+  } catch {
+    state = { enabled: true, entry: null, budgetLeft: 0 };
+  }
+  applyAutoScan({ kind: "ready", enabled: state.enabled, risk, entry: state.entry, budgetLeft: state.budgetLeft });
+
+  const button = actionButton("toggle-auto-scan");
+  if (button === null) {
+    return;
+  }
+
+  let saving = false;
+
+  button.addEventListener("click", () => {
+    if (saving) {
+      return;
+    }
+    saving = true;
+    const turningOff = state.enabled;
+    applyAutoScan({ kind: "saving", turningOff });
+
+    void writeAutoScanEnabled(!state.enabled, Date.now())
+      .then(async () => {
+        state = await currentAutoScanState(host);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        saving = false;
+        applyAutoScan({
+          kind: "ready",
+          enabled: state.enabled,
+          risk,
+          entry: state.entry,
+          budgetLeft: state.budgetLeft,
+        });
+      });
+  });
 }
 
 function startScan(url: string | null): void {
@@ -255,6 +358,7 @@ async function boot(): Promise<void> {
 
   startScan(url);
   await startWarning(url);
+  await startAutoScan(url);
   await startReport(url);
 }
 

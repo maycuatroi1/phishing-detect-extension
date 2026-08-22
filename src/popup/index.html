@@ -78,6 +78,17 @@
         color: var(--fg);
         font-weight: 600;
       }
+      ul {
+        margin: 6px 0 8px;
+        padding-left: 18px;
+        color: var(--muted);
+      }
+      li {
+        margin: 0 0 3px;
+      }
+      ul:empty {
+        margin: 0;
+      }
     </style>
   </head>
   <body>
@@ -93,6 +104,12 @@
       <button type="button" data-action="scan" disabled>Quét sâu trang này</button>
       <p class="headline" data-slot="scan-headline">Chưa quét</p>
       <p data-slot="scan-detail">-</p>
+    </section>
+    <section>
+      <p class="headline" data-slot="auto-scan-headline">Đang đọc trạng thái tự quét</p>
+      <p data-slot="auto-scan-detail">-</p>
+      <ul data-slot="auto-scan-reasons"></ul>
+      <button type="button" data-action="toggle-auto-scan" disabled>Tắt tự quét trang lạ</button>
     </section>
     <section>
       <p class="headline" data-slot="report-headline">Đang đọc trạng thái trang</p>

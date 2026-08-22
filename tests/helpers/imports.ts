@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 
 export const SOURCE_ROOT = resolve(process.cwd(), "src");
@@ -40,4 +40,30 @@ export function reachableFrom(entry: string): Set<string> {
 
 export function readSource(relativePath: string): string {
   return readFileSync(resolve(SOURCE_ROOT, relativePath), "utf8");
+}
+
+export function directImportsOf(relativePath: string): string[] {
+  return importsOf(resolve(SOURCE_ROOT, relativePath)).map(sourceKey);
+}
+
+export function sourceFiles(): string[] {
+  const found: string[] = [];
+  const stack = [SOURCE_ROOT];
+
+  while (stack.length > 0) {
+    const dir = stack.pop();
+    if (dir === undefined) {
+      break;
+    }
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = resolve(dir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(full);
+      } else if (entry.name.endsWith(".ts")) {
+        found.push(sourceKey(full));
+      }
+    }
+  }
+
+  return found.sort();
 }

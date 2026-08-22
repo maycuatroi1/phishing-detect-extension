@@ -17,8 +17,10 @@ Tier 1 gửi 20 bit đầu của mã băm tên miền, tức là một mẩu 5 k
 miền khác nhau, nên máy chủ không đọc ra được bạn đang ở đâu. Nhưng chính việc có một request tier 1
 đã nói với máy chủ rằng máy bạn vừa mở một trang lạ vào đúng lúc đó, và điều đó đủ để dựng lại nhịp
 duyệt web của bạn. Phần "Điều tier 1 không giấu được" ở dưới nói kỹ chuyện này. Tier 2 và tier 3 gửi
-URL đầy đủ, nhưng chỉ khi bạn tự bấm nút, và chúng mang một install token nối các lần bấm của cùng
-một máy lại với nhau.
+URL đầy đủ, và chúng mang một install token nối các lần gửi của cùng một máy lại với nhau. Tier 3
+chỉ chạy khi bạn bấm. Tier 2 chạy khi bạn bấm, và từ bản này nó còn tự chạy trong một trường hợp hẹp:
+tên miền chưa có kết luận nào và điểm rủi ro tính tại máy vượt ngưỡng. Phần "Tier 2 tự chạy khi nào"
+ở dưới nói đủ điều kiện, trần mỗi ngày và cách tắt hẳn.
 
 ## Tier 0: danh sách tải sẵn, tra trong máy
 
@@ -91,13 +93,13 @@ Bản này **không có công tắc tắt tier 1**. Cách duy nhất để khôn
 extension, hoặc chỉ ghé những trang đã nằm sẵn trong danh sách tier 0. Đó là một hở thật của bản
 hiện tại, không phải một chi tiết bị bỏ quên.
 
-## Tier 2: quét sâu, chỉ khi bạn bấm
+## Tier 2: quét sâu, khi bạn bấm hoặc khi trang lạ đủ đáng ngờ
 
-Tier 2 **không bao giờ tự chạy**. Nó chỉ chạy sau khi bạn mở popup và bấm nút "Quét sâu trang này".
-Service worker chạy nền không có đường gọi tới tier 2, và điều đó được khoá bằng test
+Tier 2 chạy trong đúng hai trường hợp: bạn mở popup và bấm nút "Quét sâu trang này", hoặc cổng lọc
+tự quét mô tả ở mục kế cho phép. Không có trường hợp thứ ba, và điều đó được khoá bằng test
 `tests/tier2/no-auto-scan.test.ts`.
 
-Khi bạn bấm, ba thứ rời khỏi máy:
+Trong cả hai trường hợp, ba thứ rời khỏi máy:
 
 1. `POST /v1/install` với body rỗng `{}`, chỉ ở lần đầu tiên, để xin một install token. Xem mục
    install token bên dưới.
@@ -119,6 +121,48 @@ trang trong máy bạn** và không gửi nội dung trang đi: nó không có c
 
 Mỗi install token có một hạn mức quét. Hết hạn mức thì extension dừng hẳn, không thử lại và không
 gửi request nào nữa cho tới khi bạn bấm lại sau mốc mở lại.
+
+### Tier 2 tự chạy khi nào
+
+Trước bản này, tier 2 chỉ chạy khi bạn bấm. Đổi lại, một trang lừa đảo mà máy chủ chưa từng biết thì
+im lặng tuyệt đối cho tới khi bạn tự nghi ngờ và tự bấm, mà lúc đó thường là muộn. Bản này mở một
+đường tự quét hẹp, và hẹp ở đây có nghĩa cụ thể.
+
+Extension chỉ tự gửi URL đầy đủ lên máy chủ khi **tất cả** những điều sau cùng đúng:
+
+1. Công tắc "Tự quét trang lạ" trong popup đang bật. Nó bật sẵn, và tắt là đúng một cú bấm.
+2. Trang là http hoặc https, và tên miền không phải địa chỉ nội bộ, tên máy trong mạng riêng, hay
+   đuôi do cơ quan đăng ký cấp có kiểm tra pháp nhân như `.gov.vn`, `.edu.vn`, `.gov`, `.edu`.
+3. Tên miền chưa có kết luận nào: không nằm trong danh sách tier 0 và tier 1 cũng không trả về
+   `phishing` hay `legit`. Một tên miền đã được đánh dấu hợp lệ thì **không bao giờ** bị tự quét, kể
+   cả khi điểm rủi ro của nó rất cao.
+4. Điểm rủi ro của tên miền, tính hoàn toàn trong máy bạn, đạt từ ngưỡng trở lên.
+5. Hôm nay chưa tự quét tên miền đó, và số lượt tự quét trong ngày chưa chạm trần 6 lượt. Trần đó
+   thấp hơn hẳn hạn mức 20 lượt mỗi ngày của một install token, để phần còn lại vẫn dành cho những
+   lần bạn tự bấm.
+
+**Điểm rủi ro tính hoàn toàn trong máy bạn và không một byte nào của phép tính đó rời khỏi máy.** Nó
+chỉ đọc **tên miền**, không đọc URL đầy đủ, không đọc nội dung trang, không gọi mạng, không đọc kho
+dữ liệu nào. Nó là một hàm thuần trong `src/lib/risk.ts` không import một module nào khác, và
+`tests/risk/local-scoring.test.ts` khoá điều đó bằng cách cho mọi lối ra mạng nổ tung rồi bắt nó vẫn
+chấm điểm được.
+
+Những thứ làm tăng điểm đều đọc ra được từ chính tên miền: từ khoá cờ bạc, từ khoá làm bằng giả, từ
+khoá dụ nhập OTP hoặc mật khẩu, tên thương hiệu ngân hàng hoặc sàn thương mại điện tử gắn vào một
+tên miền không phải của họ, punycode `xn--`, IP công cộng trần, nền tảng host miễn phí, đuôi tên
+miền rẻ, chuỗi số dài, nhiều dấu gạch ngang, subdomain sâu bất thường.
+
+Popup liệt kê **đúng những tín hiệu đã kích hoạt cho trang bạn đang mở**, kèm điểm của từng tín
+hiệu. Một cảnh báo mà không nói được vì sao là một cảnh báo không dùng được, nên phần đó không phải
+tuỳ chọn.
+
+Khi một lượt tự quét chạy, thứ rời khỏi máy đúng bằng thứ một cú bấm gửi đi: URL đầy đủ của tab, kèm
+install token. Cảnh báo tự động cũng chỉ là badge và chữ trong popup; extension vẫn không chặn và
+không chuyển hướng.
+
+**Tắt hẳn:** mở popup, bấm "Tắt tự quét trang lạ". Sau đó không lượt tự quét nào chạy nữa, kể cả với
+trang điểm rủi ro cao nhất, và nút bấm tay vẫn dùng được. Trạng thái công tắc nằm trong IndexedDB
+tại máy bạn, không gửi đi đâu.
 
 ## Tier 3: report, chỉ khi bạn bấm
 
@@ -162,7 +206,7 @@ Ba giới hạn có chủ ý quanh nó:
 
 ## Những gì nằm lại trong máy và không bao giờ rời máy
 
-Extension dùng bốn database IndexedDB, tất cả đều nằm trong hồ sơ Chrome của bạn trên máy này.
+Extension dùng năm database IndexedDB, tất cả đều nằm trong hồ sơ Chrome của bạn trên máy này.
 IndexedDB của extension **không** đồng bộ qua tài khoản Google, khác với `chrome.storage.sync`.
 
 - `anti-fraud-blocklist`: danh sách đã tải, số phiên bản, etag, thời điểm tải.
@@ -172,6 +216,10 @@ IndexedDB của extension **không** đồng bộ qua tài khoản Google, khác
   máy.
 - `anti-fraud-dismissals`: với mỗi trang bạn đã tắt cảnh báo, lưu **tên miền dạng chữ thường rõ
   ràng** và thời điểm tắt. Đây là lịch sử các trang bạn từng tắt cảnh báo, cũng nằm nguyên trong máy.
+- `anti-fraud-auto-scan`: trạng thái công tắc tự quét, và sổ ngân sách của ngày hôm nay gồm **tên
+  miền dạng chữ thường rõ ràng** của những trang đã tự quét trong ngày, điểm rủi ro và kết luận. Sổ
+  của những ngày trước bị xoá ngay khi có lượt tự quét đầu tiên của ngày mới, nên nó không tích lại
+  thành lịch sử duyệt web. Sổ này nằm nguyên trong máy và không gửi đi đâu.
 
 Việc bạn tắt cảnh báo cho một trang là một quyết định cục bộ. Nó không được gửi đi đâu và không đổi
 kết luận của máy chủ về trang đó.
@@ -179,7 +227,7 @@ kết luận của máy chủ về trang đó.
 Trong bộ nhớ, chỉ tồn tại tới khi service worker ngủ: bản giải mã của danh sách tier 0 và các nhóm
 tier 1 đã hỏi trong 5 phút gần nhất.
 
-Gỡ extension xoá cả bốn database.
+Gỡ extension xoá cả năm database.
 
 ## Những gì extension không bao giờ làm
 
@@ -191,7 +239,10 @@ Gỡ extension xoá cả bốn database.
   thứ ba, không bán dữ liệu.
 - Không chặn trang, không chuyển hướng, không chèn trang khoá. Extension chỉ đổi badge và chữ trong
   popup. Điều này được khoá bằng `pnpm lint:no-blocking`.
-- Không tự động gửi URL đầy đủ. Việc đó chỉ xảy ra sau một cú bấm của bạn.
+- Không gửi URL đầy đủ của mọi trang bạn mở. Việc đó chỉ xảy ra sau một cú bấm của bạn, hoặc trong
+  trường hợp hẹp của cổng tự quét ở mục "Tier 2 tự chạy khi nào": tối đa 6 tên miền một ngày, mỗi
+  tên miền một lần, chỉ với tên miền chưa có kết luận và vượt ngưỡng rủi ro, và tắt được bằng một
+  cú bấm.
 
 ## Thứ không giấu được: IP, User-Agent và ngôn ngữ trình duyệt
 
@@ -225,7 +276,7 @@ Extension **không** xin quyền đọc mọi trang, **không** cài content scr
 
 ## Cách xoá dữ liệu của bạn
 
-Tại máy: `chrome://extensions`, chọn extension, "Remove". Việc này xoá cả bốn database kể trên, kể
+Tại máy: `chrome://extensions`, chọn extension, "Remove". Việc này xoá cả năm database kể trên, kể
 cả install token.
 
 Tại máy chủ: extension không có nút xoá dữ liệu phía máy chủ. Muốn xoá những gì đã gửi trong tier 2

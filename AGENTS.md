@@ -162,6 +162,11 @@ tier 2 cần đều đã có sẵn:
   quyền `storage`, tức là một dòng quyền mới trong bản review của Chrome Web Store để đổi lấy đúng
   một bản ghi. Không đáng.
 
+Cổng tự quét cũng **không thêm quyền nào**, và đó là một ràng buộc cứng chứ không phải may mắn.
+Chấm điểm rủi ro chỉ đọc **host**, thứ mà quyền `tabs` đã cho từ tier 0. Không content script, không
+`scripting`, không `webRequest`. Nếu một tín hiệu rủi ro nào đó cần nội dung trang thì tín hiệu đó
+không thuộc về bộ chấm điểm này.
+
 Lô quyền tiếp theo chỉ mở ra khi tier 3 cần, không sớm hơn.
 
 Bốn tier của plan `anti-fraud-he-thong-song`:
@@ -308,29 +313,146 @@ máy người dùng.
 
 ## Tier 2
 
-Tier 2 gửi **URL đầy đủ** lên server và tiêu một lượt LLM thật. Nó chỉ chạy khi người dùng bấm nút
-"Quét sâu trang này" trong popup. Không listener điều hướng, không alarm, không chạy nền, không
-prefetch, không "quét trước cho nhanh".
+Tier 2 gửi **URL đầy đủ** lên server và tiêu một lượt LLM thật. Nó chạy trong đúng hai trường hợp:
+người dùng bấm nút "Quét sâu trang này" trong popup, hoặc cổng lọc tự quét ở `src/lib/auto-scan.ts`
+cho phép. Không có trường hợp thứ ba.
 
-Ràng buộc đó là ràng buộc **chi phí**, không phải một tối ưu. Mỗi lần quét là một lần gọi model tính
-tiền vào tài khoản chủ dự án. Nối tier 2 vào lưu lượng duyệt web là để hoá đơn trôi theo số tab người
-ta mở.
+Ràng buộc nền vẫn là ràng buộc **chi phí**. Mỗi lần quét là một lần gọi model tính tiền vào tài khoản
+chủ dự án. Nối tier 2 thẳng vào lưu lượng duyệt web là để hoá đơn trôi theo số tab người ta mở, nên
+đường tự quét đi qua một cổng lọc chứ không đi thẳng.
 
-### "Chỉ khi bấm" được khoá bằng cấu trúc chứ không bằng ý định
+### Invariant cũ đã bị đảo có chủ ý, đọc mục này trước khi sửa test
 
-Service worker **không import được** một dòng nào của tier 2. `src/background/index.ts` chỉ với tới
-`background/tier0.ts` và `background/tier1.ts`; `lib/tier2.ts`, `lib/scan.ts`, `lib/install.ts` và
-`lib/token-store.ts` nằm ngoài đồ thị import đó, và `tests/tier2/no-auto-scan.test.ts` đi bộ đồ thị
-import để bắt lỗi ngay khi ai đó nối vào. `pnpm --filter extension build` cũng chứng minh điều này ở
-mức bundle: `dist/background.js` không chứa chuỗi `/v1/scan` nào.
+Tới commit `a4f0930`, invariant là "tier 2 **không bao giờ** tự chạy", khoá bằng
+`tests/tier2/no-auto-scan.test.ts` ở hai tầng: vế runtime không có lời gọi nào, và vế đồ thị import
+không có cạnh nào từ `src/background/**` tới `src/lib/tier2.ts`.
 
-Vế động của cùng một tính chất: bài test mô phỏng điều hướng qua **20 trang lạ**, stub luôn cả
-`globalThis.fetch` để không đường nào lọt, rồi assert số request `/v1/scan` đúng bằng **không**. Sau
-đó gọi `runManualScan` đúng một lần và assert đúng một `POST /v1/scan`.
+Lý do đảo: `mamibet88.cc` là một trang cờ bạc thật, không có trong artifact, bucket tier 1 rỗng, và
+tier 2 kết luận `is_scam: true` trong 5 giây. Tức hệ **phát hiện được**, nhưng chỉ khi có người bấm
+nút, mà người cần được cảnh báo lại chính là người không nghĩ tới việc bấm.
 
-Bốn file tier 2 cũng không được nhắc `chrome.tabs`, `chrome.alarms`, `chrome.webNavigation`,
-`chrome.runtime`, `addListener` hay `setInterval`. Một hàm không có cách nào tự chạy thì nó không thể
-tự chạy.
+Invariant mới **chặt hơn chứ không lỏng hơn**, và cùng file test khoá nó:
+
+- Host dưới ngưỡng rủi ro thì tuyệt đối không tự quét.
+- Host có verdict `legit` trong artifact thì tuyệt đối không tự quét, kể cả khi điểm rủi ro cao.
+- Host đã là `phishing` thì cũng không tự quét, vì cảnh báo đã có rồi, quét thêm chỉ tốn quota.
+- Không bao giờ vượt trần `AUTO_SCAN_DAILY_CAP` lượt tự quét mỗi ngày.
+- Người dùng tắt công tắc thì không lượt nào chạy.
+- Một host đã tự quét rồi thì không tự quét lại trong cùng ngày.
+- Chỗ giữ ngân sách nằm **trước** request, không phải sau khi có kết quả.
+
+Mỗi mệnh đề đã được kiểm bằng mutation: phá nó thì test đỏ. Cụ thể, bài kiểm trần **không** lặp qua
+chính hằng số nó đang kiểm; nó lái đúng 12 host viết ra nguyên văn rồi assert số `POST /v1/scan` bằng
+đúng 6. Nâng trần lên 12 hay hạ xuống 3 đều làm nó đỏ.
+
+### Cổng lọc là thứ duy nhất nối background với tier 2
+
+`src/background/**` vẫn **không được import thẳng** `lib/tier2.ts`, `lib/scan.ts`, `lib/install.ts`
+hay `lib/token-store.ts`. Đường duy nhất từ service worker tới tier 2 đi qua `src/lib/auto-scan.ts`,
+và trong toàn bộ `src/` chỉ có **đúng hai** file nhắc tới `runManualScan`: `lib/auto-scan.ts` và
+`popup/popup.ts`. Test enumerate cả cây `src/` để cưỡng chế con số hai đó, nên một đường tắt thứ ba
+không thêm vào được mà không làm test đỏ.
+
+`lib/auto-scan.ts` cũng không bị gọi vòng qua cổng được: hàm duy nhất nó xuất ra để chạy một lượt là
+`runGatedAutoScan`, và bên trong nó `decideAutoScan` chạy trước `runManualScan`, không có nhánh nào
+đi vòng.
+
+Sáu file (bốn file tier 2 cộng `lib/auto-scan.ts`, `lib/auto-scan-store.ts` và `lib/risk.ts`) không
+được nhắc `chrome.tabs`, `chrome.alarms`, `chrome.webNavigation`, `chrome.runtime`, `addListener`
+hay `setInterval`. Một hàm không có cách nào tự chạy thì nó không thể tự chạy; thứ duy nhất châm ngòi
+là listener tab của tier 0 trong `src/background/tier0.ts`.
+
+Ranh giới tier 1 **không đổi**: `tests/kanon/token-isolation.test.ts` vẫn đi bộ đồ thị import của
+`background/tier1.ts` và bắt nó không chạm được một module tier 2 nào. Vì thế cổng tự quét nằm ở
+`src/background/auto-scan.ts` chứ không nằm trong `background/tier1.ts`, và `background/index.ts`
+mới là chỗ ghép hai vế lại.
+
+### Chấm điểm rủi ro tại máy, ngưỡng 4
+
+`src/lib/risk.ts` là một hàm thuần **không import một module nào khác**, chỉ ăn **host**, và không
+chạm mạng, kho, đồng hồ hay số ngẫu nhiên. `tests/risk/local-scoring.test.ts` khoá cả ba vế: đồ thị
+import của nó đúng bằng một phần tử, nguồn của nó không chứa `fetch`, `XMLHttpRequest`, `WebSocket`,
+`sendBeacon`, `navigator`, `chrome.`, `indexedDB`, `crypto.`, `Math.random`, `Date.now` hay
+`new Date`, và nó vẫn chấm được cả trăm host trong khi mọi global mạng đã bị stub cho nổ tung.
+
+Đây là điều làm phương án "lọc trước rồi mới tự quét" khả thi về mặt riêng tư: điểm rủi ro của mọi
+host người dùng ghé đều được tính, nhưng chỉ host vượt ngưỡng mới có một byte nào rời khỏi máy.
+
+Hai loại tín hiệu, tổng trọng số từ **4** trở lên là quét:
+
+- Trọng số 4, một mình đã đủ: IP công cộng trần, punycode `xn--`, từ khoá làm bằng giả (`lambang`,
+  `bangcap`), từ khoá cờ bạc (`casino`, `nhacai`, `xoso`, `bet` cạnh chữ số), từ khoá dụ nhập tài
+  khoản (`otp`, `xacthuc`, `dangnhap`).
+- Trọng số 2 hoặc 3, cần một tín hiệu thứ hai: nền tảng host miễn phí, tên thương hiệu gắn vào một
+  tên miền không phải của thương hiệu đó, từ khoá đầu tư hoặc crypto hoặc nạp thẻ, chữ `vn` dán vào
+  tên miền không phải đuôi `.vn`, đuôi tên miền rẻ, chuỗi số dài, đuôi số may mắn kiểu nhà cái, dấu
+  gạch ngang, subdomain sâu, host dài, nhãn thiếu nguyên âm.
+
+Ngưỡng 4 nghĩa là "hoặc một lý do không cãi được, hoặc ít nhất hai lý do độc lập". Các host bị bỏ lỡ
+ở điểm 3 gần như đều là host chỉ có đúng một tín hiệu yếu, và đó cũng là chỗ ba false positive duy
+nhất của corpus nằm.
+
+**Miễn quét hẳn**, điểm luôn bằng 0: địa chỉ nội bộ và tên máy mạng riêng (`192.168.*`, `10.*`,
+`127.*`, `172.16-31.*`, `localhost`, `*.local`, host một nhãn, các TLD dành riêng của RFC 2606), và
+đuôi do cơ quan đăng ký cấp có kiểm tra pháp nhân (`gov.vn`, `edu.vn`, `ac.vn`, `org.vn`, `dcs.vn`,
+`gov`, `edu`, `mil`, `int`).
+
+Đo trên corpus thật `phishing-detect-web/exports/eval-v1` ngày 23/08/2026, không phải cảm tính:
+
+```sh
+pnpm --filter extension eval:risk ../phishing-detect-web/exports/eval-v1
+```
+
+- 1406 host lừa đảo: **163 host vượt ngưỡng, 11,6%**.
+- 1043 host hợp lệ: **0 host vượt ngưỡng, 0,00%**.
+
+Đọc con số 11,6% cho đúng: đây là một **bộ lọc trước**, không phải một bộ phát hiện. Việc của nó là
+giữ 6 lượt tự quét mỗi ngày trỏ vào những host đáng ngờ nhất; kết luận vẫn do tier 2 đưa ra. Phần
+lớn corpus là tên miền `.com` trông vô hại như `toolvl.com` hay `crazii.com`, và từ **một mình cái
+tên** thì không có cách nào biết chúng lừa đảo.
+
+Đọc con số 0,00% cũng phải cho đúng, vì đây là chỗ dễ tự lừa nhất: whitelist eval-v1 có 951 host
+`.vn`, trong đó 700 host `.gov.vn` và 67 host `.edu.vn` được **miễn hẳn**, nên phép đo này rộng lượng
+với bộ chấm điểm. Vocabulary tài chính (`trade`, `market`, `finance`, `invest`) được giữ ở trọng số 2
+đúng vì lý do đó: trên một whitelist toàn cầu chúng sẽ nổ nhiều hơn nhiều, và ở trọng số 2 chúng
+không tự mình vượt ngưỡng được. Ba mươi host hợp lệ sát ngưỡng nhất của corpus được viết nguyên văn
+vào `tests/risk/local-scoring.test.ts` cùng 36 trang người ta mở hằng ngày, nên hạ ngưỡng xuống 3
+làm test đỏ ngay.
+
+### Trần tự quét là 6, và vì sao không phải 20
+
+Hạn mức production đo thật là **20 lượt một install token trong 86400 giây**. `AUTO_SCAN_DAILY_CAP`
+là **6**, để lại **14** lượt cho những lần người dùng tự bấm.
+
+Sáu là con số cho một người bình thường: nó đủ để bắt vài trang lạ đáng ngờ trong một ngày duyệt web,
+và nó vẫn để lại phần lớn hạn mức cho việc mà người dùng chủ động làm. Đặt sát 20 nghĩa là một ngày
+xui, khi người ta lạc vào một chùm trang cờ bạc, cổng tự quét ăn sạch hạn mức rồi nút bấm tay chết
+với 429 mà người dùng không hiểu vì sao. Cổng lọc phải nhường chỗ cho ý định của người dùng, không
+tranh chỗ với nó.
+
+Sổ ngân sách nằm trong IndexedDB `anti-fraud-auto-scan`, đúng một bản ghi cho mỗi ngày, và bản ghi
+của ngày cũ bị xoá ngay khi ngày mới có lượt tự quét đầu tiên. Nhờ vậy nó không tích lại thành một
+lịch sử duyệt web trong máy. Ngày tính theo `YYYY-MM-DD` giờ UTC, lấy từ `dayKeyOf`.
+
+Một lượt tự quét **giữ chỗ trong sổ trước khi bắn request**, không phải sau khi có kết quả, và
+`runGatedAutoScan` xếp các lượt vào một hàng nối tiếp. Hai điều đó cộng lại là thứ giữ cho trần không
+bị vượt khi mười hai tab lạ mở cùng một lúc; test lái đúng tình huống đó.
+
+### Công tắc trong popup, và lời giải thích đi kèm
+
+Popup có nút `toggle-auto-scan`, mặc định **bật**. Trạng thái nằm trong IndexedDB
+`anti-fraud-auto-scan` chứ không nằm trong `chrome.storage`, đúng vì lý do đã dùng cho install token:
+`chrome.storage` đòi thêm một dòng quyền trong bản review của Chrome Web Store để đổi lấy một bản
+ghi boolean. Không đáng.
+
+Popup còn phải nói **vì sao** nó tự quét trang đang mở: `src/popup/auto-scan-panel.ts` liệt kê đúng
+những tín hiệu đã kích hoạt cho host đó, kèm trọng số từng cái. Người dùng thấy cảnh báo mà không
+biết vì sao là cảnh báo không dùng được, nên phần đó có test riêng trong
+`tests/tier2/auto-scan-panel.test.ts`.
+
+Badge cảnh báo tự động chỉ được sơn khi verdict thật sự là `is_scam: true`. Một lượt tự quét ra
+`is_scam: false` **không** sơn badge "OK": một phiếu boolean chưa hiệu chuẩn của một model không phải
+giấy chứng nhận sạch, và sơn xanh cho nó là nói dối người dùng.
 
 ### Install token
 
@@ -479,6 +601,7 @@ pnpm --filter extension typecheck         # tsc --noEmit
 pnpm --filter extension test              # vitest, toàn bộ
 pnpm --filter extension test:contract     # check băm vendor cộng tests/contract
 pnpm --filter extension test:kanon        # chứng minh k-anonymity của tier 1
+pnpm --filter extension eval:risk <thư mục>   # đo bộ chấm điểm trên corpus eval-v1 thật
 pnpm --filter extension package           # dist/ thành dist/extension.zip, rồi quét lại bên trong zip
 ```
 
@@ -507,11 +630,17 @@ tới `/v1/lookup`, và ba thứ phải đúng cùng lúc:
 - Mở vài tab lạ liền nhau thì chúng gộp vào cùng một request nhiều `p`, không phải mỗi tab một
   request, và request bắn đi trễ vài trăm mili giây so với lúc mở trang.
 
-**Tier 2, chỉ khi bấm.** Mở tab Network của popup (chuột phải vào icon, "Inspect popup"), rồi điều
-hướng qua chục trang lạ: Network **không có** một request `/v1/scan` nào, chỉ có `/v1/lookup`. Bấm
-"Quét sâu trang này" mới thấy `POST /v1/install` lần đầu, rồi `POST /v1/scan`, rồi vài
+**Tier 2, khi bấm.** Mở tab Network của popup (chuột phải vào icon, "Inspect popup"), rồi bấm
+"Quét sâu trang này": thấy `POST /v1/install` lần đầu, rồi `POST /v1/scan`, rồi vài
 `GET /v1/scan/{id}` cách nhau hai giây. Bấm lần thứ hai không có `/v1/install` nữa vì token đã nằm
 trong IndexedDB `anti-fraud-install`.
+
+**Tier 2, tự chạy.** Xem Network của service worker rồi điều hướng qua chục trang lạ **dưới ngưỡng**
+(ví dụ vài trang tin tức `.vn`): chỉ có `/v1/lookup`, không có `/v1/scan` nào. Rồi ghé một host vượt
+ngưỡng, ví dụ `mamibet88.cc`: thấy `POST /v1/scan` tự phát ra, badge đổi sang cảnh báo sau vài giây,
+và popup liệt kê đúng những tín hiệu đã kích hoạt. Ghé lại host đó lần thứ hai trong ngày thì
+**không** có request `/v1/scan` nào nữa. Bấm "Tắt tự quét trang lạ" rồi ghé một host vượt ngưỡng
+khác: cũng không có request nào.
 
 Bấm đủ 20 lần trên cùng một install token thì lần 21 là 429 và popup ghi mốc mở lại lấy từ
 `error.reset_at`; sau đó Network đứng im, không có request nào nữa cho tới khi bấm lại.
@@ -597,10 +726,14 @@ Rồi qua CDP gọi `Extensions.loadUnpacked` với đường dẫn thư mục v
 manifest hợp lệ và ném lỗi nếu không. Từ Chrome 137, cờ dòng lệnh `--load-extension` bị tắt mặc định
 bởi feature `DisableLoadExtensionCommandLineSwitch`, nên đường CDP đáng tin hơn đường cờ dòng lệnh.
 
-Sau khi nạp được, bật `Network` trên target service worker rồi mở một tab tới một host lạ: phải thấy
-đúng `GET /v1/blocklist` một lần và `GET /v1/lookup?p=xxxxx` với đúng năm ký tự hex, không
-`Authorization`, không `Cookie`, không `Referer`. Tier 2 và tier 3 thì **đừng** tự động bấm: chúng
-tiêu quota thật và đẩy report thật vào hàng đợi moderation của production.
+Sau khi nạp được, bật `Network` trên target service worker rồi mở một tab tới một host lạ **dưới
+ngưỡng rủi ro**: phải thấy đúng `GET /v1/blocklist` một lần và `GET /v1/lookup?p=xxxxx` với đúng năm
+ký tự hex, không `Authorization`, không `Cookie`, không `Referer`.
+
+Cẩn thận hơn trước ở một chỗ: từ khi có cổng tự quét, **điều hướng tới một host vượt ngưỡng sẽ tiêu
+một lượt quota production thật**, không cần ai bấm gì. Muốn thử tự động mà không đốt quota thì tắt
+công tắc tự quét trong popup trước, hoặc chỉ lái qua những host dưới ngưỡng. Tier 3 thì vẫn **đừng**
+tự động bấm: nó đẩy report thật vào hàng đợi moderation của production.
 
 ## Bố cục
 
@@ -626,12 +759,17 @@ src/lib/install.ts            hợp đồng /v1/install, hình dạng install to
 src/lib/token-store.ts        IndexedDB riêng cho install token, đúng một bản ghi
 src/lib/scan.ts               hợp đồng /v1/scan và /v1/scan/{id}, parser verdict envelope
 src/lib/tier2.ts              lấy token, gửi scan, poll, dừng hẳn khi hết quota
+src/lib/risk.ts               chấm điểm rủi ro từ host, hàm thuần, không import gì, không chạm mạng
+src/lib/auto-scan.ts          cổng lọc tự quét, đường duy nhất từ background tới tier 2
+src/lib/auto-scan-store.ts    IndexedDB riêng cho công tắc tự quét và sổ ngân sách mỗi ngày
 src/background/tier0.ts       alarm, listener tab, sơn badge
 src/background/tier1.ts       leo thang khi tier 0 nói unknown, nối vào nguồn ngẫu nhiên
-src/background/index.ts       service worker MV3, chỉ đăng ký, không chạm tier 2
-src/popup/popup.ts            popup action, chỗ duy nhất gọi runManualScan
+src/background/auto-scan.ts   nối verdict tier 0 và tier 1 vào cổng lọc, sơn badge khi model nói lừa đảo
+src/background/index.ts       service worker MV3, chỉ đăng ký listener
+src/popup/popup.ts            popup action, chỗ duy nhất gọi runManualScan bằng một cú bấm
 src/popup/scan-panel.ts       outcome thành chữ hiện lên, hàm thuần
 src/popup/warning-panel.ts    trạng thái cảnh báo thành chữ và nhãn nút tắt, hàm thuần
+src/popup/auto-scan-panel.ts  công tắc tự quét và danh sách tín hiệu đã kích hoạt, hàm thuần
 src/lib/dismissal-store.ts    IndexedDB riêng cho host đã tắt cảnh báo, một bản ghi mỗi host
 scripts/check-vendor-hash.ts  rehash vendor/, cổng của build và test:contract
 scripts/vendor-ledger.ts      đọc và kiểm sổ digest
@@ -641,10 +779,12 @@ scripts/lint-no-blocking.ts   runner của invariant no-blocking, in lý do rồ
 scripts/no-blocking-rules.ts  bốn luật no-blocking, hàm thuần, có test fixture riêng
 scripts/package.ts            dist/ thành dist/extension.zip, kiểm manifest, icon, HTML, secret
 scripts/pack-rules.ts         luật gói, giải đường dẫn manifest và HTML, đọc kích thước PNG
+scripts/eval-risk.ts          đo bộ chấm điểm trên corpus eval-v1, không nằm trong cổng CI nào
 scripts/zip.ts                writer zip ghim ngày và reader zip có kiểm CRC, dùng chung hai chỗ
 tests/contract/               hợp đồng seam, layout AFBL, version, production thật
 tests/kanon/                  k-anonymity tier 1: không credential, so ở client, gộp lô, token không rò
-tests/tier2/                  không tự quét, hết quota là dừng, vòng đời một lần bấm
+tests/tier2/                  cổng lọc tự quét, hết quota là dừng, vòng đời một lần bấm
+tests/risk/                   chấm điểm rủi ro chạy tại máy, hiệu chuẩn ngưỡng trên corpus thật
 tests/package/                zip xác định được, ghim ngày, secret trong zip vẫn bị bắt, luật gói
 tests/helpers/imports.ts      đi bộ đồ thị import của src/, dùng để khoá ranh giới tier
 tests/                        vitest phần còn lại

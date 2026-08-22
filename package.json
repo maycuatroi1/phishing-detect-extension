@@ -13,6 +13,7 @@
     "build": "tsx scripts/check-vendor-hash.ts && vite build && tsx scripts/check-no-secrets.ts",
     "check:no-secrets": "tsx scripts/check-no-secrets.ts",
     "check:vendor": "tsx scripts/check-vendor-hash.ts",
+    "eval:risk": "tsx scripts/eval-risk.ts",
     "lint:no-blocking": "tsx scripts/lint-no-blocking.ts",
     "package": "tsx scripts/package.ts && tsx scripts/check-no-secrets.ts",
     "typecheck": "tsc --noEmit",

@@ -12,7 +12,8 @@
     "Convention của skill harness-engineering ghi 'all passes: false'. Ý đồ của nó là mặc định phải là chưa-chứng-minh chứ không phải ép mọi thứ thành false vĩnh viễn.",
     "Mâu thuẫn cần nói thẳng thay vì im lặng chọn một bên: tính tới 2026-08-23 nhiều hành vi trong file này đã có bằng chứng end-to-end thật. Extension đã được nạp vào Chrome thật qua CDP Extensions.loadUnpacked và tier 0 cùng tier 1 chạy được với production https://anti-fraud.omelet.tech; hợp đồng tier 1 và tier 2 đã được đo thẳng trên production ngày 22/08/2026; pnpm package đã sinh zip xác định. Theo nghĩa đó, một số mục dưới đây xứng đáng true.",
     "Chúng vẫn để false vì phiên tạo ra file này chỉ được phép TẠO đúng feature_list.json trong repo extension và không được chạy bất kỳ lệnh nào ở đây, nên nó không tự tay quan sát được hành vi nào. Một 'passes': true do nghe kể lại chính là thứ luật thứ ba ở trên cấm.",
-    "Việc cần làm tiếp, không phải viết lại file này: chạy lại từng bộ steps trong một Chrome thật, rồi lật passes kèm proof cho đúng những mục đã quan sát được. Repo llm-phishing-detection-evaluation đang để cả 16 mục false theo cùng lý do và cũng cần một lượt đối chiếu như vậy."
+    "Việc cần làm tiếp, không phải viết lại file này: chạy lại từng bộ steps trong một Chrome thật, rồi lật passes kèm proof cho đúng những mục đã quan sát được. Repo llm-phishing-detection-evaluation đang để cả 16 mục false theo cùng lý do và cũng cần một lượt đối chiếu như vậy.",
+    "Ngày 23/08/2026 invariant 'tier 2 không bao giờ tự chạy' bị đảo có chủ ý: Bình vào https://mamibet88.cc/vi-vn/ và không thấy cảnh báo nào, dù tier 2 kết luận is_scam true trong 5 giây khi bấm tay. Mục tier2-only-on-click vì thế được viết rộng ra chứ không co lại: nó vẫn đòi vế cũ (duyệt trang dưới ngưỡng không tiêu lượt nào, bấm nút thì quét) và đòi thêm sáu vế mới của cổng lọc. Không mục nào bị xoá và không mục nào bị thu hẹp."
   ],
   "features": [
     {
@@ -92,9 +93,9 @@
     {
       "id": "tier2-only-on-click",
       "category": "cost",
-      "description": "Tier 2 chỉ chạy khi người dùng bấm: duyệt web không bao giờ tự tiêu một lượt LLM",
+      "description": "Tier 2 chỉ chạy khi người dùng bấm hoặc khi cổng lọc cho phép: duyệt qua trang dưới ngưỡng rủi ro không bao giờ tiêu một lượt LLM",
       "steps": [
-        "Nạp extension và điều hướng qua ít nhất 20 trang lạ",
+        "Nạp extension và điều hướng qua ít nhất 20 trang lạ có điểm rủi ro dưới ngưỡng",
         "Xác nhận số request POST /v1/scan phát ra đúng bằng không",
         "Mở popup ở một trang và bấm nút Quét sâu trang này",
         "Xác nhận đúng một POST /v1/scan phát ra sau cú bấm đó"
@@ -135,6 +136,44 @@
         "Xác nhận không có token trong đó",
         "Bấm quét sâu và xác nhận /v1/scan có mang token",
         "Xác nhận token nằm trong IndexedDB chứ không nằm trong bất kỳ file nào của dist"
+      ],
+      "passes": false
+    },
+    {
+      "id": "auto-scan-gated",
+      "category": "functional",
+      "description": "Host lạ có điểm rủi ro vượt ngưỡng thì extension tự quét sâu và tự cảnh báo, không cần người dùng bấm gì",
+      "steps": [
+        "Nạp extension, chờ đồng bộ blocklist xong, mở Network của service worker",
+        "Điều hướng tới một host không có trong artifact và có điểm rủi ro từ 4 trở lên, ví dụ mamibet88.cc",
+        "Xác nhận đúng một POST /v1/scan tự phát ra mà không ai bấm nút nào",
+        "Xác nhận badge đổi sang trạng thái cảnh báo sau khi verdict về với is_scam true",
+        "Mở popup và xác nhận nó liệt kê đúng những tín hiệu rủi ro đã kích hoạt cho host đó"
+      ],
+      "passes": false
+    },
+    {
+      "id": "auto-scan-filter-holds",
+      "category": "cost",
+      "description": "Cổng lọc giữ được cả năm vế: dưới ngưỡng không quét, host legit không quét, hết trần ngày không quét, tắt công tắc không quét, host đã quét không quét lại trong ngày",
+      "steps": [
+        "Điều hướng qua chục trang tin tức .vn dưới ngưỡng và xác nhận không có POST /v1/scan nào",
+        "Điều hướng tới một host có verdict legit trong artifact nhưng điểm rủi ro cao, xác nhận không có POST /v1/scan nào",
+        "Ghé một host vượt ngưỡng hai lần trong cùng ngày, xác nhận chỉ có đúng một POST /v1/scan",
+        "Ghé đủ số host vượt ngưỡng cho tới khi chạm trần 6 lượt, xác nhận host thứ bảy không phát ra request nào",
+        "Bấm Tắt tự quét trang lạ trong popup rồi ghé một host vượt ngưỡng khác, xác nhận không có request nào"
+      ],
+      "passes": false
+    },
+    {
+      "id": "risk-scoring-stays-local",
+      "category": "privacy",
+      "description": "Chấm điểm rủi ro chạy hoàn toàn trong máy: duyệt web không phát ra request nào cho tới khi một host thật sự vượt ngưỡng",
+      "steps": [
+        "Mở Network của service worker và xoá log",
+        "Điều hướng qua vài chục host dưới ngưỡng, gồm cả host .gov.vn và địa chỉ IP nội bộ",
+        "Xác nhận không có request nào ngoài /v1/lookup của tier 1",
+        "Xác nhận không có request nào mang tên miền, URL hay điểm rủi ro trong thân hay query"
       ],
       "passes": false
     },
