@@ -5,7 +5,7 @@ import { invalidateTier0Cache, lookupHost, type Tier0Verdict } from "../lib/tier
 
 export const BLOCKLIST_ALARM_NAME = "blocklist-refresh";
 
-interface BadgeLook {
+export interface BadgeLook {
   readonly text: string;
   readonly color: string;
   readonly title: string;
@@ -38,11 +38,14 @@ export function badgeLookFor(verdict: Tier0Verdict): BadgeLook {
   return BADGE_BY_VERDICT[verdict];
 }
 
-export async function paintBadge(tabId: number, verdict: Tier0Verdict): Promise<void> {
-  const look = badgeLookFor(verdict);
+export async function paintLook(tabId: number, look: BadgeLook): Promise<void> {
   await chrome.action.setBadgeText({ tabId, text: look.text });
   await chrome.action.setBadgeBackgroundColor({ tabId, color: look.color });
   await chrome.action.setTitle({ tabId, title: look.title });
+}
+
+export async function paintBadge(tabId: number, verdict: Tier0Verdict): Promise<void> {
+  await paintLook(tabId, badgeLookFor(verdict));
 }
 
 export async function evaluateTab(tabId: number, url: string | undefined): Promise<Tier0Verdict> {
@@ -103,7 +106,9 @@ export async function refreshBlocklist(): Promise<void> {
   console.warn("[tier0] không lấy được artifact:", outcome.reason, "giữ version", outcome.keptVersion);
 }
 
-export function registerTier0(): void {
+export type TabEvaluator = (tabId: number, url: string | undefined) => Promise<unknown>;
+
+export function registerTier0(evaluate: TabEvaluator = evaluateTab): void {
   chrome.alarms.create(BLOCKLIST_ALARM_NAME, {
     periodInMinutes: BLOCKLIST_REFRESH_PERIOD_MINUTES,
   });
@@ -126,10 +131,10 @@ export function registerTier0(): void {
     if (changeInfo.url === undefined && changeInfo.status !== "loading") {
       return;
     }
-    void evaluateTab(tabId, changeInfo.url ?? tab.url);
+    void evaluate(tabId, changeInfo.url ?? tab.url);
   });
 
   chrome.tabs.onActivated.addListener((info) => {
-    void chrome.tabs.get(info.tabId).then((tab) => evaluateTab(info.tabId, tab.url));
+    void chrome.tabs.get(info.tabId).then((tab) => evaluate(info.tabId, tab.url));
   });
 }

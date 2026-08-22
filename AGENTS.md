@@ -123,10 +123,14 @@ Tier 0 là tính năng đầu tiên, nên nó là lô quyền đầu tiên. Ba q
 Ba thứ **cố ý vẫn không xin**: không content script, không `storage` (IndexedDB không cần quyền),
 không `<all_urls>`. Extension không bao giờ đọc nội dung trang ở tier 0; nó chỉ băm host.
 
+Tier 1 **không thêm quyền nào**. `GET /v1/lookup` nằm trên đúng origin đã có trong
+`host_permissions`, và nó cũng không trả header CORS nên `host_permissions` là thứ khiến fetch chạy
+được, y như `/v1/blocklist`. Lô quyền tiếp theo chỉ mở ra khi tier 2 cần, không sớm hơn.
+
 Bốn tier của plan `anti-fraud-he-thong-song`:
 
 - Tier 0 `GET /v1/blocklist`, tra cục bộ, không chạm mạng khi duyệt web. **Đã có.**
-- Tier 1 `GET /v1/lookup`, k-anonymity trên 20 bit đầu của `SHA256(host)`, không gắn auth.
+- Tier 1 `GET /v1/lookup`, k-anonymity trên 20 bit đầu của `SHA256(host)`, không gắn auth. **Đã có.**
 - Tier 2 `POST /v1/scan` cộng `GET /v1/scan/{scan_id}`, chỉ chạy khi người dùng bấm.
 - Tier 3 `POST /v1/report`, khai báo của người dùng, không bao giờ là nhãn.
 
@@ -166,9 +170,10 @@ tiện.
 Sáu mã từ chối: `too_short`, `bad_magic`, `unsupported_format`, `truncated_body`, `trailing_bytes`,
 `unsorted_entries`. Mạng chết hoặc HTTP 4xx/5xx cũng là giữ bản cũ, không phải xoá bản cũ.
 
-Artifact **rỗng** (đúng 18 byte, 0 entry) là một câu trả lời hợp lệ chứ không phải lỗi. Production
-đang trả đúng thế vì cả corpus còn ở trạng thái `pending`: dự đoán của model không phải nhãn, nhãn
-chỉ sinh ra qua moderation console.
+Artifact **rỗng** (đúng 18 byte, 0 entry) là một câu trả lời hợp lệ chứ không phải lỗi, và decoder
+phải chịu được nó. Production từng trả đúng thế khi cả corpus còn `pending`: dự đoán của model không
+phải nhãn, nhãn chỉ sinh ra qua moderation console. Từ 22/08/2026 artifact production **đã có dữ
+liệu thật**: 19594 byte, 1406 entry phish và 1041 entry legit.
 
 ### Version là số thứ tự thay đổi nội dung, không phải đồng hồ
 
@@ -186,6 +191,83 @@ Hai điều client phải tôn trọng:
 kỳ dòng nào vừa nhắc `version` vừa có `new Date(`, `Date.now()`, `Date.parse(`, `toISOString(`,
 `getTime()`, `* 1000` hay `/ 1000` đều làm test đỏ kèm tên file và số dòng. Nếu bạn đang đọc dòng này
 vì test đó vừa đỏ: version không phải timestamp, đừng sửa test.
+
+## Tier 1
+
+Tier 1 chỉ chạy khi tier 0 nói `unknown` hoặc `no_artifact`, tức host không có trong artifact cục bộ.
+Nó hỏi server đúng **20 bit đầu** của `SHA256(host)` và tự so hash đầy đủ ở máy mình.
+
+Đây là mức 2 trong ba mức privacy, và là cách Safe Browsing v4 cùng Have I Been Pwned làm. Mức 3,
+gửi full URL mọi lần, là tự dựng một máy ghi lịch sử duyệt web rồi phải bảo vệ nó. Full URL chỉ rời
+khỏi máy khi người dùng bấm, và đó là tier 2.
+
+Đường đi:
+
+1. `hostSha256Hex(host)` cho 64 ký tự hex, `prefixOfHashHex` lấy **5 ký tự đầu**. `lookup_prefix_bits`
+   bên server là 20, và 20 bit đúng bằng 5 ký tự hex.
+2. `createLookupBatcher` xếp prefix vào hàng đợi, gộp **tối đa 16 prefix một request**, và chỉ bắn đi
+   sau một khoảng trễ có jitter.
+3. `GET /v1/lookup?p=<prefix>&p=<prefix>...`. Tên tham số là **`p`**, lặp lại một lần cho mỗi host.
+4. Server trả **cả bucket**: mọi entry của corpus rơi vào 20 bit đó, mỗi entry là một hash đầy đủ 64
+   ký tự.
+5. `matchFullHash` so hash đầy đủ **trong extension**. Server không bao giờ biết host nào trong bucket
+   là host client quan tâm.
+
+### Không gắn install token, và đó là chủ ý
+
+Request tier 1 đi ra với `credentials: "omit"`, `referrerPolicy: "no-referrer"` và **không một header
+nào** do client tự đặt. Không `Authorization`, không cookie, không install token dưới bất kỳ hình
+thức nào.
+
+Lý do không phải là lười. Một token nối luồng prefix về một danh tính duy nhất và phá đúng tính chất
+mà endpoint này tồn tại để giữ: gộp 2447 host thật vào 2^20 bucket chỉ có nghĩa khi không ai biết
+chuỗi prefix nào là của cùng một máy. Gắn token vào là biến k-anonymity thành một cuốn nhật ký duyệt
+web có tên người.
+
+Rủi ro tương ứng ở phía server, ghi ở đây để đừng ai vô tình dựng lại nó: **một dòng log gộp prefix
+với IP xoá sạch tính chất k-anonymity mà endpoint vẫn chạy bình thường nên không ai nhận ra.** Spec
+vendor cấm thẳng điều đó và production đáp lại bằng header
+`x-lookup-anonymity: k-anonymity; no authentication; client identifiers not logged`.
+
+Client giữ phần của mình bằng ba thứ: không danh tính, gộp lô nên một request không tương ứng một lần
+điều hướng, và jitter nên thời điểm request không trỏ về thời điểm mở trang.
+
+### Jitter phải tiêm được từ ngoài
+
+`createLookupBatcher` nhận `random: () => number` làm tham số bắt buộc, và `jitterDelayMs` là hàm
+thuần. Không file nào trong `src/lib/lookup*.ts` hay `src/lib/tier1.ts` được gọi `Math.random()`;
+`tests/kanon/batching-jitter.test.ts` khoá lại bằng cách cho `Math.random` nổ tung rồi bắt đường tier
+1 vẫn phải chạy. Chỗ duy nhất nối vào nguồn ngẫu nhiên thật là `src/background/tier1.ts`.
+
+Trễ nằm trong `[200ms, 1000ms]`. Hàng đợi đầy 16 prefix thì bắn ngay, vì giữ thêm chỉ làm người dùng
+chờ chứ không thêm được gì cho privacy.
+
+### Bốn câu trả lời của tier 1, và chúng không được gộp
+
+- `phishing`, `legit`: hash đầy đủ khớp một entry trong bucket, `c === 1` nghĩa là đã xác nhận.
+- `unknown`: corpus **có** host này nhưng chưa quyết định. Đây là một câu trả lời thật.
+- `absent`: bucket không chứa hash đầy đủ của host, dù prefix trùng. Corpus không có host này.
+- `unavailable`: mạng chết, server 400 hoặc 500, hoặc server bỏ sót bucket vừa hỏi. Không kết luận.
+
+`unknown` và `absent` là hai chuyện khác nhau và spec vendor nói thẳng như vậy. Gộp chúng lại là làm
+mất thông tin mà moderation console đã bỏ công tạo ra.
+
+### Hợp đồng đo thẳng trên production
+
+Đo ngày 22/08/2026, không phải suy đoán:
+
+- `GET /v1/lookup?p=00000` trả 200 với `{"buckets":{"00000":[]}}`, không cần header auth nào.
+- Khoá của `buckets` là **đúng chuỗi client gửi**, giữ nguyên hoa thường: gửi `00A1F` thì nhận
+  `00A1F`. Client này luôn gửi hex thường và vẫn chuẩn hoá khoá về thường khi đọc.
+- Thiếu `p` là 400 `missing_prefix`. `p` không phải 5 hex là 400 `invalid_prefix`, và **giá trị bị
+  từ chối không được vọng lại trong message**. 17 prefix là 400 `too_many_prefixes`.
+- `/v1/lookup` **không** trả header CORS, y hệt `/v1/blocklist`.
+
+`tests/contract/lookup-seam.test.ts` khoá client vào bản vendor, và
+`tests/kanon/production-anonymity.test.ts` chứng minh tính chất trên corpus production thật: nó dựng
+16 host chỉ trùng đúng 20 bit đầu với entry thật, hỏi cả 16 trong **một** request không auth, rồi bắt
+extension kết luận `absent` cho từng cái. Server đã đưa đủ ứng viên; thứ duy nhất quyết định nằm ở
+máy người dùng.
 
 ## Hai file seam vendor
 
@@ -235,6 +317,7 @@ pnpm --filter extension lint:no-blocking  # manifest và source không được 
 pnpm --filter extension typecheck         # tsc --noEmit
 pnpm --filter extension test              # vitest, toàn bộ
 pnpm --filter extension test:contract     # check băm vendor cộng tests/contract
+pnpm --filter extension test:kanon        # chứng minh k-anonymity của tier 1
 ```
 
 Repo đứng một mình nhưng vẫn có `pnpm-workspace.yaml` với `packages: [.]` và `name: "extension"`
@@ -247,11 +330,20 @@ trong `package.json`, để lệnh `pnpm --filter extension ...` mà plan và CI
 `manifest.json` nằm trong `public/` và chỉ trở thành gốc extension sau khi build copy nó ra `dist/`.
 
 Muốn tự tay xem badge đổi: `pnpm --filter extension test` đã chứng minh vế đó bằng artifact fixture
-trong `tests/tier0-badge.test.ts`. Trên production hiện **chưa** ghé được domain nào có trong
-blocklist, vì artifact production đang rỗng: cả corpus còn `pending`, chưa có site nào được
-moderation console gán `confirmed_phishing` hay `confirmed_legit`. Khi có nhãn đầu tiên thì mở
-`chrome://extensions`, xem service worker, chạy `refreshBlocklist()`, rồi ghé domain đó và mở tab
-Network: badge đổi mà Network trống.
+trong `tests/tier0-badge.test.ts`. Trên production, artifact đã có 1406 entry phish và 1041 entry
+legit, nên hai ca dưới đây phân biệt được thật.
+
+**Tier 0, host có trong artifact.** Mở `chrome://extensions`, xem service worker, chạy
+`refreshBlocklist()`, ghé một domain nằm trong blocklist rồi mở tab Network: badge đổi mà Network
+trống. Không một byte nào rời khỏi máy.
+
+**Tier 1, host lạ.** Ghé một domain **không** có trong artifact. Tab Network hiện đúng một request
+tới `/v1/lookup`, và ba thứ phải đúng cùng lúc:
+
+- Request headers **không có** `Authorization` và **không có** `Cookie`.
+- Query chỉ gồm tham số `p`, mỗi giá trị đúng 5 ký tự hex. Không host, không URL, không gì dài hơn.
+- Mở vài tab lạ liền nhau thì chúng gộp vào cùng một request nhiều `p`, không phải mỗi tab một
+  request, và request bắn đi trễ vài trăm mili giây so với lúc mở trang.
 
 ## Bố cục
 
@@ -267,7 +359,11 @@ src/lib/host.ts               URL thành host, host thành entry uint64
 src/lib/blocklist-store.ts    IndexedDB, đúng một bản ghi
 src/lib/blocklist-sync.ts     tải, kiểm, quyết định nhận hay giữ bản cũ
 src/lib/tier0.ts              tra cục bộ, có cache trong bộ nhớ
+src/lib/lookup.ts             hợp đồng /v1/lookup, dựng URL, so hash đầy đủ
+src/lib/lookup-batch.ts       gộp tối đa 16 prefix, jitter tiêm từ ngoài, cache bucket
+src/lib/tier1.ts              host thành prefix, bucket thành verdict
 src/background/tier0.ts       alarm, listener tab, sơn badge
+src/background/tier1.ts       leo thang khi tier 0 nói unknown, nối vào nguồn ngẫu nhiên
 src/background/index.ts       service worker MV3, chỉ đăng ký
 src/popup/                    popup action
 scripts/check-vendor-hash.ts  rehash vendor/, cổng của build và test:contract
@@ -276,5 +372,6 @@ scripts/check-no-secrets.ts   post-check sau build
 scripts/secret-patterns.ts    tám pattern secret, có test riêng
 scripts/lint-no-blocking.ts   cưỡng chế invariant no-blocking
 tests/contract/               hợp đồng seam, layout AFBL, version, production thật
+tests/kanon/                  k-anonymity tier 1: không credential, so ở client, gộp lô
 tests/                        vitest phần còn lại
 ```

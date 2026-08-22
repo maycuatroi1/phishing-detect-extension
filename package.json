@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:contract": "tsx scripts/check-vendor-hash.ts && vitest run tests/contract",
+    "test:kanon": "vitest run tests/kanon",
     "test:secrets": "vitest run tests/secret-patterns.test.ts --reporter=verbose"
   },
   "devDependencies": {
