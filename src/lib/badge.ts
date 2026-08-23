@@ -54,6 +54,10 @@ export const NO_DATA_NOT_SAFE =
 export const OK_MEANS_NO_FINDING =
   "Chữ OK ở đây đọc như kết quả của một phép kiểm: phép kiểm không tìm thấy vấn đề, chứ không phải trang đã được ai xem.";
 
+export const OK_MEANS_NOTHING_RAN =
+  "Chữ OK ở đây không phải kết quả của phép kiểm nào: không có phép kiểm nào chạy được trên trang " +
+  "này, nên nó khác hẳn OK màu xám xanh nơi đã có một phép kiểm chạy và không thấy gì.";
+
 export const BADGE_NEVER_BLANK =
   "Badge luôn hiện OK hoặc NG cho mọi trang, nên badge trống nghĩa là extension đang hỏng chứ không phải trang sạch.";
 

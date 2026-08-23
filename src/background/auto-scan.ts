@@ -1,10 +1,19 @@
 import { API_BASE_URL } from "../config.ts";
-import { runGatedAutoScan, type AutoScanOutcome, type KnownVerdict } from "../lib/auto-scan.ts";
+import {
+  AUTO_SCAN_DAILY_CAP,
+  runGatedAutoScan,
+  type AutoScanOutcome,
+  type KnownVerdict,
+} from "../lib/auto-scan.ts";
 import { hostOfUrl } from "../lib/host.ts";
 import {
   DISMISS_HINT,
   MACHINE_UNVERIFIED_TEXT,
   NG_TEXT,
+  NO_DATA_NOT_SAFE,
+  OK_MEANS_NOTHING_RAN,
+  OK_TEXT,
+  PENDING_COLOR,
   SOFT_COLOR,
   SOFT_REPORT_HINT,
   type BadgeLook,
@@ -19,6 +28,29 @@ export const AUTO_SCAN_WARNING_LOOK: BadgeLook = {
   color: SOFT_COLOR,
   title: `Anti-Fraud: NG màu hổ phách. Trang này chưa có trong danh sách nào, nên extension đã tự đẩy lên server quét sâu, và model nói đây là trang lừa đảo. ${MACHINE_UNVERIFIED_TEXT} Mở popup để xem những tín hiệu nào đã kích hoạt. ${SOFT_REPORT_HINT} ${DISMISS_HINT}`,
 };
+
+export const UNCHECKED_IS_NOT_CLEAN =
+  "Mọi domain lạ đều phải được đẩy qua model, nên lượt nào không đi được là một trang chưa ai " +
+  "nhìn tới. Để badge nằm nguyên ở OK màu xám xanh sẽ nói rằng một phép kiểm đã chạy và không " +
+  "thấy gì, mà ở đây thì không có phép kiểm nào chạy cả. Màu xám đậm là màu extension đã dùng " +
+  "sẵn cho 'chưa tra được', nên dùng lại đúng nó.";
+
+export const BUDGET_SPENT_REASON =
+  `Trang này chưa có trong danh sách nào, và extension đã dùng hết ${AUTO_SCAN_DAILY_CAP} lượt tự ` +
+  "quét của hôm nay nên chưa đẩy nó lên server được. Mở popup rồi bấm quét tay nếu cần kết luận ngay.";
+
+export const NO_VERDICT_REASON =
+  "Trang này chưa có trong danh sách nào. Extension đã đẩy nó lên server quét, nhưng server chưa " +
+  "trả về một kết luận đọc được, nên vẫn chưa có phép kiểm nào xong trên trang này.";
+
+export function autoScanUncheckedLook(reason: string): BadgeLook {
+  return {
+    state: "pending",
+    text: OK_TEXT,
+    color: PENDING_COLOR,
+    title: `Anti-Fraud: OK màu xám đậm. ${reason} ${OK_MEANS_NOTHING_RAN} ${NO_DATA_NOT_SAFE}`,
+  };
+}
 
 export function knownVerdictOf(verdict: string): KnownVerdict {
   if (verdict === "phishing" || verdict === "legit" || verdict === "soft") {
@@ -49,6 +81,12 @@ export async function considerAutoScan(
   }
 
   if (outcome.kind === "skipped") {
+    if (outcome.reason === "budget_spent") {
+      await paintLook(
+        tabId,
+        await userAdjustedLook(host, autoScanUncheckedLook(BUDGET_SPENT_REASON)),
+      );
+    }
     return outcome;
   }
 
@@ -65,6 +103,8 @@ export async function considerAutoScan(
 
   if (outcome.isScam === true) {
     await paintLook(tabId, await userAdjustedLook(host, AUTO_SCAN_WARNING_LOOK));
+  } else if (outcome.isScam === null) {
+    await paintLook(tabId, await userAdjustedLook(host, autoScanUncheckedLook(NO_VERDICT_REASON)));
   }
 
   await announceAutoScan(host, outcome);
