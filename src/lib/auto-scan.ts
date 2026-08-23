@@ -23,6 +23,7 @@ export const AUTO_SCAN_SKIP_REASONS = [
   "host_exempt",
   "verdict_known",
   "already_scanned_recently",
+  "attempt_failed_today",
   "budget_spent",
 ] as const;
 
@@ -68,11 +69,24 @@ export function budgetLeftOf(day: AutoScanDay): number {
   return Math.max(AUTO_SCAN_DAILY_CAP - day.entries.length, 0);
 }
 
+export const MEMORY_MEANS_AN_ANSWER =
+  "Sổ nhớ 7 ngày nói rằng host này đã được model xem rồi. Một lượt quét hỏng giữa chừng thì không " +
+  "có câu trả lời nào, nên để nó chiếm chỗ trong sổ là khoá luôn host đó khỏi mọi lượt quét suốt " +
+  "một tuần chỉ vì server lỡ hỏng một lần. Chỉ dòng đã chốt được is_scam mới tính là đã quét. " +
+  "Nhưng cũng không thử lại ngay trong ngày: một server đang hỏng sẽ ăn hết ngân sách chỉ trong " +
+  "vài lần chuyển tab, nên lượt hỏng chặn đúng phần còn lại của ngày rồi mai mới thử tiếp.";
+
 export function alreadyScannedRecently(
   memory: readonly AutoScanDay[],
   host: string,
 ): boolean {
-  return memory.some((day) => day.entries.some((entry) => entry.host === host));
+  return memory.some((day) =>
+    day.entries.some((entry) => entry.host === host && entry.isScam !== null),
+  );
+}
+
+export function attemptFailedToday(day: AutoScanDay, host: string): boolean {
+  return day.entries.some((entry) => entry.host === host && entry.isScam === null);
 }
 
 export function decideAutoScan(context: AutoScanContext): AutoScanDecision {
@@ -96,6 +110,9 @@ export function decideAutoScan(context: AutoScanContext): AutoScanDecision {
   }
   if (alreadyScannedRecently(context.memory, context.host)) {
     return { kind: "skip", reason: "already_scanned_recently", risk };
+  }
+  if (attemptFailedToday(context.day, context.host)) {
+    return { kind: "skip", reason: "attempt_failed_today", risk };
   }
   const budgetLeft = budgetLeftOf(context.day);
   if (budgetLeft <= 0) {

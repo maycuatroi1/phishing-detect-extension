@@ -9,6 +9,7 @@ import { invalidateTier0Cache } from "../../src/lib/tier0.ts";
 import { createLookupBatcher } from "../../src/lib/lookup-batch.ts";
 import { useLookupBatcher } from "../../src/background/tier1.ts";
 import {
+  ATTEMPT_FAILED_REASON,
   BUDGET_SPENT_REASON,
   NO_VERDICT_REASON,
   UNCHECKED_IS_NOT_CLEAN,
@@ -17,7 +18,11 @@ import {
 } from "../../src/background/auto-scan.ts";
 import {
   AUTO_SCAN_DAILY_CAP,
+  AUTO_SCAN_MEMORY_DAYS,
   AUTO_SCAN_SKIP_REASONS,
+  MEMORY_MEANS_AN_ANSWER,
+  alreadyScannedRecently,
+  attemptFailedToday,
   resetAutoScanGate,
   type AutoScanSkipReason,
 } from "../../src/lib/auto-scan.ts";
@@ -214,8 +219,54 @@ describe("một trang chưa quét được không được sơn như một trang
     expect(paintedColors()).not.toContain(PENDING_COLOR);
   });
 
+  it("một lượt quét hỏng không chiếm chỗ trong sổ nhớ bảy ngày", () => {
+    expect(MEMORY_MEANS_AN_ANSWER).toContain("một tuần");
+
+    const answered = {
+      day: "2026-08-20",
+      entries: [{ host: HOST_UNKNOWN, scannedAt: 1, score: 0, isScam: false }],
+    };
+    const failed = {
+      day: "2026-08-20",
+      entries: [{ host: HOST_UNKNOWN, scannedAt: 1, score: 0, isScam: null }],
+    };
+
+    expect(alreadyScannedRecently([answered], HOST_UNKNOWN)).toBe(true);
+    expect(alreadyScannedRecently([failed], HOST_UNKNOWN)).toBe(false);
+    expect(AUTO_SCAN_MEMORY_DAYS).toBe(7);
+  });
+
+  it("nhưng lượt hỏng vẫn chặn hết ngày hôm nay, để server hỏng không ăn sạch ngân sách", () => {
+    const today = {
+      day: "2026-08-23",
+      entries: [{ host: HOST_UNKNOWN, scannedAt: 1, score: 0, isScam: null }],
+    };
+
+    expect(attemptFailedToday(today, HOST_UNKNOWN)).toBe(true);
+    expect(attemptFailedToday(today, "host-khac.test")).toBe(false);
+    expect(
+      attemptFailedToday(
+        { day: "2026-08-23", entries: [{ host: HOST_UNKNOWN, scannedAt: 1, score: 0, isScam: true }] },
+        HOST_UNKNOWN,
+      ),
+    ).toBe(false);
+  });
+
+  it("lượt hỏng hôm nay được sơn chưa quét được ở những lần vào lại trang trong ngày", async () => {
+    await setup(verdictEnvelope({ parse_ok: false, is_scam: null, parse_failure_reason: "no_json" }));
+
+    await browse(HOST_UNKNOWN);
+    setBadgeBackgroundColor.mockClear();
+    setTitle.mockClear();
+    await browse(HOST_UNKNOWN);
+
+    expect(tap.requests.filter(isScanPost)).toHaveLength(1);
+    expect(paintedColors()).toContain(PENDING_COLOR);
+    expect(paintedTitles().some((title) => title.includes(ATTEMPT_FAILED_REASON))).toBe(true);
+  });
+
   it("mỗi lý do bỏ qua phải được xếp vào sơn lại hay im lặng, không lý do nào rơi ra ngoài", () => {
-    const repaints: AutoScanSkipReason[] = ["budget_spent"];
+    const repaints: AutoScanSkipReason[] = ["budget_spent", "attempt_failed_today"];
     const quiet: AutoScanSkipReason[] = [
       "disabled",
       "not_scannable",

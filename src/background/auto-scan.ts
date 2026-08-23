@@ -39,6 +39,11 @@ export const BUDGET_SPENT_REASON =
   `Trang này chưa có trong danh sách nào, và extension đã dùng hết ${AUTO_SCAN_DAILY_CAP} lượt tự ` +
   "quét của hôm nay nên chưa đẩy nó lên server được. Mở popup rồi bấm quét tay nếu cần kết luận ngay.";
 
+export const ATTEMPT_FAILED_REASON =
+  "Trang này chưa có trong danh sách nào. Extension đã thử đẩy nó lên server quét hôm nay nhưng " +
+  "không nhận được kết luận nào, và sẽ thử lại vào ngày mai chứ không thử liên tục để khỏi ăn hết " +
+  "ngân sách quét của bạn.";
+
 export const NO_VERDICT_REASON =
   "Trang này chưa có trong danh sách nào. Extension đã đẩy nó lên server quét, nhưng server chưa " +
   "trả về một kết luận đọc được, nên vẫn chưa có phép kiểm nào xong trên trang này.";
@@ -81,11 +86,14 @@ export async function considerAutoScan(
   }
 
   if (outcome.kind === "skipped") {
-    if (outcome.reason === "budget_spent") {
-      await paintLook(
-        tabId,
-        await userAdjustedLook(host, autoScanUncheckedLook(BUDGET_SPENT_REASON)),
-      );
+    const unchecked =
+      outcome.reason === "budget_spent"
+        ? BUDGET_SPENT_REASON
+        : outcome.reason === "attempt_failed_today"
+          ? ATTEMPT_FAILED_REASON
+          : null;
+    if (unchecked !== null) {
+      await paintLook(tabId, await userAdjustedLook(host, autoScanUncheckedLook(unchecked)));
     }
     return outcome;
   }
