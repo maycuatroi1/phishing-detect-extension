@@ -766,6 +766,12 @@ thay đổi phải phản ánh vào tài liệu.
 `public/icons/` có icon 16, 48, 128 và cả ba là PNG thật, đúng kích thước, được test khoá lại trong
 `tests/package/rules.test.ts`.
 
+Logo là khiên trắng trên nền chàm với một lưỡi câu đỏ bị bẻ gãy nằm gọn bên trong. Bản gốc là
+`store/icon-master-1024.png`; ba icon trong `public/icons/` và `store/icon-512.png` đều xuất xuống từ
+nó, nên sửa logo là sửa file gốc rồi xuất lại chứ đừng vẽ tay từng cỡ. Bản 16 pixel được tăng tương
+phản và độ bão hoà so với bản gốc, vì thu thẳng từ 1024 xuống 16 thì lưỡi câu nhoè thành một vệt hồng.
+Cùng logo đó là favicon của console trong `phishing-detect-web`.
+
 `store/screenshots/` có hai ảnh chụp thật của popup, sáng và tối, chụp bằng Chrome thật chạy với
 backend production, không dựng, không ghép. Chúng còn thiếu hai thứ trước khi nộp được:
 
