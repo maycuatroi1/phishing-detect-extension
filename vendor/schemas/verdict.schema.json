@@ -20,7 +20,8 @@
     "checked_at",
     "parse_ok",
     "parse_failure_reason",
-    "failure"
+    "failure",
+    "reason"
   ],
   "properties": {
     "scan_id": {
@@ -140,6 +141,14 @@
         "null"
       ],
       "description": "Why the scan failed, as an open set of stable tokens: capture_* when the page could not be fetched, model_* when the provider call failed, parse_* when the response did not validate, worker_* when the background task threw before it could record anything, and scan_abandoned when the worker never finished. A failed scan always carries a token here, never null."
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 600,
+      "description": "Why the model answered the way it did, and null unless the scan finished, its response parsed and the prompt in use asks for one. It is text a model wrote after reading a page an attacker controls, so it is evidence and not output: render it as plain text, never as markup. At most 600 characters, the ceiling the database enforces on prediction.reason."
     }
   },
   "allOf": [

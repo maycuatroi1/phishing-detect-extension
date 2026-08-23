@@ -65,6 +65,7 @@ export const VERDICT_ENVELOPE_FIELDS: readonly string[] = [
   "parse_ok",
   "parse_failure_reason",
   "failure",
+  "reason",
 ];
 
 export interface VerdictEnvelope {
@@ -83,6 +84,7 @@ export interface VerdictEnvelope {
   readonly parse_ok: boolean | null;
   readonly parse_failure_reason: ParseFailureReason | null;
   readonly failure: string | null;
+  readonly reason: string | null;
 }
 
 export interface ScanQueued {
@@ -97,6 +99,7 @@ export interface ScanCached {
   readonly checkedAt: string;
   readonly cacheAgeSeconds: number;
   readonly quotaRemaining: number;
+  readonly reason: string | null;
 }
 
 export type StartScanOutcome =
@@ -198,12 +201,16 @@ export function parseScanCached(body: unknown): ScanCached | null {
   if (typeof quota !== "number" || !Number.isInteger(quota) || quota < 0) {
     return null;
   }
+  if (!isNullableString(record.reason)) {
+    return null;
+  }
   return {
     isScam: record.is_scam,
     host: record.host,
     checkedAt: record.checked_at,
     cacheAgeSeconds: age,
     quotaRemaining: quota,
+    reason: record.reason,
   };
 }
 
@@ -265,6 +272,9 @@ export function parseVerdictEnvelope(body: unknown): VerdictEnvelope | null {
   if (!isNullableBoolean(record.parse_ok) || !isNullableString(record.failure)) {
     return null;
   }
+  if (!isNullableString(record.reason)) {
+    return null;
+  }
   if (!isNullableMember(record.parse_failure_reason, PARSE_FAILURE_REASONS)) {
     return null;
   }
@@ -285,6 +295,7 @@ export function parseVerdictEnvelope(body: unknown): VerdictEnvelope | null {
     parse_ok: record.parse_ok,
     parse_failure_reason: record.parse_failure_reason,
     failure: record.failure,
+    reason: record.reason,
   };
 }
 

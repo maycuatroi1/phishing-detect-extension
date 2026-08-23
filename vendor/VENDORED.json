@@ -4,7 +4,7 @@
   "policy": "Một digest ở đây chỉ được đổi trong đúng commit copy lại file từ repo owner, và chỉ cho thay đổi additive. Nếu digest lệch thì seam đã đổi: đọc diff của bản upstream trước, đừng sửa digest cho hết đỏ.",
   "line_endings": "Cả hai file là LF thuần. `.gitattributes` của repo này có dòng `vendor/** -text`, nên git không được phép normalise chúng sang CRLF trên Windows. Đó là lý do thư mục này tên là vendor/.",
   "owner_repo": "phishing-detect-web",
-  "owner_commit": "f01a845453773e3bafd3065e2b952ec4cd7250a0",
+  "owner_commit": "d10932d5ba20c06a02947143e77c24e10904508a",
   "contracts": {
     "public-api": {
       "seam": "public-api",
@@ -12,8 +12,8 @@
       "source_path": "openapi/public.yaml",
       "path": "vendor/openapi/public.yaml",
       "algorithm": "sha256",
-      "digest": "7f0a4c1d8d0b5ebd13b6f80ccfd8e4cc0501eb22292f0c09c1e43af5eb1d0ebc",
-      "bytes": 60180,
+      "digest": "99099c89ca5c33e5cf5d31d9376e4914a4567af340517322817d2a9a52954d8e",
+      "bytes": 61491,
       "line_ending": "lf",
       "change_policy": "additive-until-support-floor"
     },
@@ -23,8 +23,8 @@
       "source_path": "schemas/verdict.schema.json",
       "path": "vendor/schemas/verdict.schema.json",
       "algorithm": "sha256",
-      "digest": "6f7176fc62afc2f88420820a2e9d65e9faed935129aca9eb2d634c51fb8673dd",
-      "bytes": 6552,
+      "digest": "e030b4865dba7646d1eccb0bb33306b31f1da60db13f4ed8881f16e58d154712",
+      "bytes": 7048,
       "line_ending": "lf",
       "change_policy": "additive-until-support-floor"
     }

@@ -62,6 +62,7 @@ export function verdictEnvelope(overrides: Partial<VerdictEnvelope> = {}): Verdi
     parse_ok: true,
     parse_failure_reason: null,
     failure: null,
+    reason: null,
     ...overrides,
   };
 }

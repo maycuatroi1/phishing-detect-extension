@@ -424,6 +424,7 @@ paths:
                     cache_age_seconds: 3600
                     cache_ttl_seconds: 604800
                     quota_remaining: 500
+                    reason: The page asks for a bank one time code on a domain registered four days ago.
         "202":
           description: The scan is queued.
           headers:
@@ -506,6 +507,7 @@ paths:
                     parse_ok: null
                     parse_failure_reason: null
                     failure: null
+                    reason: null
                 decided:
                   summary: Finished and parsed, so the three verdict fields are populated.
                   value:
@@ -524,6 +526,7 @@ paths:
                     parse_ok: true
                     parse_failure_reason: null
                     failure: null
+                    reason: The page asks for a bank one time code on a domain registered four days ago.
                 unparsed:
                   summary: >-
                     The model answered but the answer did not validate, so the scan failed and
@@ -544,6 +547,7 @@ paths:
                     parse_ok: false
                     parse_failure_reason: no_json
                     failure: parse_no_json
+                    reason: null
                 workerCrashed:
                   summary: >-
                     The background task threw after the capture landed, so the scan is failed with
@@ -564,6 +568,7 @@ paths:
                     parse_ok: null
                     parse_failure_reason: null
                     failure: worker_seam_mismatch
+                    reason: null
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -1271,7 +1276,7 @@ components:
       additionalProperties: false
       required:
         [status, is_scam, confidence, confidence_basis, source, host, checked_at,
-         cache_age_seconds, cache_ttl_seconds, quota_remaining]
+         cache_age_seconds, cache_ttl_seconds, quota_remaining, reason]
       description: >-
         A verdict already on record for this host. Deliberately not a VerdictEnvelope: it carries
         no scan_id, site_id or evidence_id, because the scan it came from may belong to a
@@ -1312,6 +1317,14 @@ components:
           type: integer
           minimum: 0
           description: Unchanged by this call. It is reported so the client can show one number.
+        reason:
+          type: ["string", "null"]
+          maxLength: 600
+          description: >-
+            Why the model answered the way it did on the scan this verdict came from, and null
+            when that scan recorded none. Same untrusted evidence as the reason on a verdict
+            envelope: it is text a model wrote after reading a page an attacker controls, so
+            render it as plain text, never as markup. At most 600 characters.
 
     ReportRequest:
       type: object
@@ -1397,6 +1410,7 @@ components:
         - parse_ok
         - parse_failure_reason
         - failure
+        - reason
       properties:
         scan_id:
           type: string
@@ -1488,6 +1502,15 @@ components:
             validate, worker_* when the background task threw before it could record anything, and
             scan_abandoned when the worker never finished. A failed scan always carries a token
             here, never null.
+        reason:
+          type: ["string", "null"]
+          maxLength: 600
+          description: >-
+            Why the model answered the way it did, and null unless the scan finished, its response
+            parsed and the prompt in use asks for one. It is text a model wrote after reading a
+            page an attacker controls, so it is evidence and not output: render it as plain text,
+            never as markup. At most 600 characters, the ceiling the database enforces on
+            prediction.reason.
       allOf:
         - description: >-
             A verdict exists only when the scan finished and its response parsed. Anything else
